@@ -7,278 +7,304 @@ import 'package:permission_handler/permission_handler.dart';
 import '../domain/camera_service.dart';
 import '../domain/camera_state.dart';
 
-class CameraServiceImpl implements CameraService {
-  CameraController? _controller;
-  CameraDescription? _frontCamera;
-
-  StreamController<CameraState> _stateController =
-      StreamController<CameraState>.broadcast();
-  CameraState _state = const CameraState.idle();
-
-  bool _isInitializing = false;
-
-  /// Frame-processing lock. When non-null, the previous frame is still
-  /// being handled and new frames are dropped.
-  bool _processingFrame = false;
-
-  /// Throttling: the last time we forwarded a frame to the consumer.
-  DateTime _lastForwardedFrame = DateTime.fromMillisecondsSinceEpoch(0);
-
-  StreamController<CameraState> get _activeStateController {
-    if (_stateController.isClosed) {
-      _stateController = StreamController<CameraState>.broadcast();
-    }
-    return _stateController;
-  }
-
-  @override
-  Stream<CameraState> get stateStream => _activeStateController.stream;
-
-  @override
-  CameraState get state => _state;
-
-  @override
-  CameraController? get controller => _controller;
-
-  @override
-  int get sensorOrientation => _frontCamera?.sensorOrientation ?? 0;
-
-  @override
-  bool get isStreaming => _controller?.value.isStreamingImages ?? false;
-
-  void _emit(CameraState next) {
-    _state = next;
-    if (!_activeStateController.isClosed) {
-      _activeStateController.add(next);
-    }
-  }
-
-  // -----------------------------------------------------------------
-  // Initialization
-  // -----------------------------------------------------------------
-  @override
-  Future<void> initialize() async {
-    if (_state.status == CameraStatus.ready ||
-        _state.status == CameraStatus.streaming) {
-      return; // idempotent
-    }
-    if (_isInitializing) {
-      return; // prevent duplicate concurrent initializations
-    }
-
-    _isInitializing = true;
-    try {
-      _emit(_state.copyWith(status: CameraStatus.requestingPermission));
-
-      // 1. Permission
-      var permission = await Permission.camera.status;
-      if (!permission.isGranted) {
-        permission = await Permission.camera.request();
-      }
-
-    if (permission.isPermanentlyDenied) {
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.permissionPermanentlyDenied,
-          errorMessage: 'Camera permission permanently denied.',
-        ),
-      );
-      return;
-    }
-
-    if (!permission.isGranted) {
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.permissionDenied,
-          errorMessage: 'Camera permission denied.',
-        ),
-      );
-      return;
-    }
-
-    // 2. Discover front camera
-    _emit(_state.copyWith(status: CameraStatus.discovering));
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        _emit(
-          _state.copyWith(
-            status: CameraStatus.failed,
-            errorMessage: 'No cameras available on this device.',
-          ),
-        );
-        return;
-      }
-      final frontCameras = cameras.where(
-        (c) => c.lensDirection == CameraLensDirection.front,
-      ).toList();
-      if (frontCameras.isEmpty) {
-        _emit(
-          _state.copyWith(
-            status: CameraStatus.noFrontCamera,
-            errorMessage: 'No front-facing camera found on this device.',
-          ),
-        );
-        return;
-      }
-      _frontCamera = frontCameras.first;
-    } on CameraException catch (e) {
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.failed,
-          errorMessage: 'Camera discovery failed: ${e.description}',
-        ),
-      );
-      return;
-    }
-
-    // 3. Clean up any existing controller before creating new one
-    if (_controller != null) {
-      try {
-        if (_controller!.value.isStreamingImages) {
-          await _controller!.stopImageStream();
-        }
-      } catch (_) {}
-      try {
-        await _controller!.dispose();
-      } catch (_) {}
-      _controller = null;
-    }
-
-    // 4. Create and initialise controller
-    _emit(_state.copyWith(status: CameraStatus.initialising));
-    try {
-      final controller = CameraController(
-        _frontCamera!,
-        ResolutionPreset.medium, // 480p is plenty for face landmarks
-        enableAudio: false,
-        imageFormatGroup: defaultTargetPlatform == TargetPlatform.android
-            ? ImageFormatGroup.nv21
-            : ImageFormatGroup.bgra8888,
-      );
-      await controller.initialize();
-      _controller = controller;
-      _emit(_state.copyWith(status: CameraStatus.ready));
-    } on CameraException catch (e) {
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.failed,
-          errorMessage: 'Camera initialisation failed: ${e.description}',
-        ),
-      );
-    } catch (e) {
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.failed,
-          errorMessage: 'Unexpected camera error: $e',
-        ),
-      );
-    }
-  } finally {
-    _isInitializing = false;
-  }
+/// Injectable platform boundary: tests exercise the production service itself.
+abstract class CameraSession {
+  dynamic get previewController;
+  bool get initialized;
+  bool get streaming;
+  int get rotationDegrees;
+  Future<void> initialize();
+  Future<void> start(void Function(CameraImage) onFrame);
+  Future<void> stop();
+  Future<void> dispose();
 }
 
-  // -----------------------------------------------------------------
-  // Streaming
-  // -----------------------------------------------------------------
+class PluginCameraSession implements CameraSession {
+  PluginCameraSession(CameraDescription description)
+    : _controller = CameraController(
+        description,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup:
+            defaultTargetPlatform == TargetPlatform.android
+                ? ImageFormatGroup.nv21
+                : ImageFormatGroup.bgra8888,
+      );
+  final CameraController _controller;
   @override
-  Future<void> startStream({
-    required FrameCallback onFrame,
-    int maxFps = 15,
-  }) async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.failed,
-          errorMessage: 'Cannot start stream: camera not initialised.',
-        ),
-      );
-      return;
+  CameraController get previewController => _controller;
+  @override
+  bool get initialized => _controller.value.isInitialized;
+  @override
+  bool get streaming => _controller.value.isStreamingImages;
+  @override
+  int get rotationDegrees {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return _controller.description.sensorOrientation;
     }
-    if (controller.value.isStreamingImages) return;
-
-    final minFrameInterval = Duration(microseconds: (1000000 / maxFps).round());
-
-    try {
-      await controller.startImageStream((image) {
-        // Backpressure: drop if the consumer is still processing.
-        if (_processingFrame) return;
-
-        // Throttle: drop frames that arrive too fast.
-        final now = DateTime.now();
-        if (now.difference(_lastForwardedFrame) < minFrameInterval) return;
-
-        _processingFrame = true;
-        _lastForwardedFrame = now;
-        try {
-          onFrame(image);
-        } finally {
-          // Always release the lock, even if the callback threw.
-          _processingFrame = false;
-        }
-      });
-      _emit(_state.copyWith(status: CameraStatus.streaming));
-    } on CameraException catch (e) {
-      _processingFrame = false; // safety release
-      _emit(
-        _state.copyWith(
-          status: CameraStatus.failed,
-          errorMessage: 'Failed to start stream: ${e.description}',
-        ),
-      );
-    }
+    final orientation = switch (_controller.value.deviceOrientation.name) {
+      'landscapeLeft' => 90,
+      'portraitDown' => 180,
+      'landscapeRight' => 270,
+      _ => 0,
+    };
+    final sensor = _controller.description.sensorOrientation;
+    return _controller.description.lensDirection == CameraLensDirection.front
+        ? (sensor + orientation) % 360
+        : (sensor - orientation + 360) % 360;
   }
 
   @override
-  Future<void> stopStream() async {
-    final controller = _controller;
-    if (controller == null) return;
-    if (!controller.value.isStreamingImages) return;
+  Future<void> initialize() => _controller.initialize();
+  @override
+  Future<void> start(void Function(CameraImage) onFrame) =>
+      _controller.startImageStream(onFrame);
+  @override
+  Future<void> stop() => _controller.stopImageStream();
+  @override
+  Future<void> dispose() => _controller.dispose();
+}
 
+class CameraServiceImpl implements CameraService {
+  CameraServiceImpl({
+    Future<PermissionStatus> Function()? permissionStatus,
+    Future<PermissionStatus> Function()? requestPermission,
+    Future<List<CameraDescription>> Function()? discover,
+    CameraSession Function(CameraDescription)? createSession,
+  }) : _permissionStatus = permissionStatus ?? (() => Permission.camera.status),
+       _requestPermission =
+           requestPermission ?? (() => Permission.camera.request()),
+       _discover = discover ?? availableCameras,
+       _createSession = createSession ?? PluginCameraSession.new;
+
+  final Future<PermissionStatus> Function() _permissionStatus;
+  final Future<PermissionStatus> Function() _requestPermission;
+  final Future<List<CameraDescription>> Function() _discover;
+  final CameraSession Function(CameraDescription) _createSession;
+  final _states = StreamController<CameraState>.broadcast();
+  CameraState _state = const CameraState.idle();
+  CameraSession? _session;
+  Future<void> _operations = Future<void>.value();
+  Future<void>? _frameJob;
+  int _generation = 0;
+  int _streamGeneration = 0;
+  bool _acceptFrames = false;
+  bool _closed = false;
+
+  Future<void> _enqueue(Future<void> Function() action) {
+    final operation = _operations.then((_) => action());
+    _operations = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
+
+  @override
+  Stream<CameraState> get stateStream => _states.stream;
+  @override
+  CameraState get state => _state;
+  @override
+  dynamic get controller => _session?.previewController;
+  @override
+  int get sensorOrientation => _session?.rotationDegrees ?? 0;
+  @override
+  bool get isStreaming => _session?.streaming ?? false;
+
+  void _emit(CameraState state) {
+    _state = state;
+    if (!_states.isClosed) _states.add(state);
+  }
+
+  @override
+  Future<void> initialize() {
+    final generation = _generation;
+    return _enqueue(() async {
+      if (_closed || generation != _generation) return;
+      if (_session?.initialized ?? false) return;
+      CameraSession? candidate;
+      bool cancelled() => _closed || generation != _generation;
+      try {
+        _emit(const CameraState(status: CameraStatus.requestingPermission));
+        var permission = await _permissionStatus();
+        if (cancelled()) return;
+        if (!permission.isGranted && !permission.isPermanentlyDenied) {
+          permission = await _requestPermission();
+        }
+        if (cancelled()) return;
+        if (!permission.isGranted) {
+          _emit(
+            CameraState(
+              status:
+                  permission.isPermanentlyDenied
+                      ? CameraStatus.permissionPermanentlyDenied
+                      : CameraStatus.permissionDenied,
+              errorMessage:
+                  'Camera access is required to play. You can retry or open Settings.',
+            ),
+          );
+          return;
+        }
+        _emit(const CameraState(status: CameraStatus.discovering));
+        final cameras = await _discover();
+        if (cancelled()) return;
+        final front = cameras.where(
+          (c) => c.lensDirection == CameraLensDirection.front,
+        );
+        if (front.isEmpty) {
+          _emit(
+            const CameraState(
+              status: CameraStatus.noFrontCamera,
+              errorMessage:
+                  'No front-facing camera is available on this device.',
+            ),
+          );
+          return;
+        }
+        await _releaseSession();
+        if (cancelled()) return;
+        _emit(const CameraState(status: CameraStatus.initialising));
+        candidate = _createSession(front.first);
+        await candidate.initialize();
+        if (cancelled()) return;
+        _session = candidate;
+        candidate =
+            null; // Ownership transfers only after successful initialization.
+        _emit(const CameraState(status: CameraStatus.ready));
+      } catch (error) {
+        if (!cancelled()) {
+          _emit(
+            CameraState(
+              status: CameraStatus.failed,
+              errorMessage: 'Camera initialization failed: $error',
+            ),
+          );
+        }
+      } finally {
+        if (candidate != null) await candidate.dispose();
+      }
+    });
+  }
+
+  @override
+  Future<void> startStream({required FrameCallback onFrame, int maxFps = 15}) {
+    if (maxFps <= 0) {
+      return Future<void>.error(ArgumentError.value(maxFps, 'maxFps'));
+    }
+    final generation = _generation;
+    return _enqueue(() async {
+      if (_closed || generation != _generation) return;
+      final session = _session;
+      if (session == null || !session.initialized) {
+        _emit(
+          const CameraState(
+            status: CameraStatus.failed,
+            errorMessage: 'Camera is not initialized. Please retry.',
+          ),
+        );
+        return;
+      }
+      if (session.streaming) return;
+      final streamGeneration = ++_streamGeneration;
+      final minInterval = Duration(microseconds: (1000000 / maxFps).round());
+      DateTime? lastFrame;
+      _acceptFrames = true;
+      try {
+        await session.start((image) {
+          if (!_acceptFrames ||
+              streamGeneration != _streamGeneration ||
+              _frameJob != null) {
+            return;
+          }
+          final now = DateTime.now();
+          if (lastFrame != null && now.difference(lastFrame!) < minInterval) {
+            return;
+          }
+          lastFrame = now;
+          _frameJob = Future<void>.sync(() => onFrame(image))
+              .catchError((Object error, StackTrace stack) {
+                if (_acceptFrames && generation == _generation) {
+                  _emit(
+                    CameraState(
+                      status: CameraStatus.failed,
+                      errorMessage: 'Camera frame processing failed: $error',
+                    ),
+                  );
+                }
+              })
+              .whenComplete(() {
+                _frameJob = null;
+              });
+        });
+        if (generation == _generation) {
+          _emit(const CameraState(status: CameraStatus.streaming));
+        }
+      } catch (error) {
+        _acceptFrames = false;
+        _emit(
+          CameraState(
+            status: CameraStatus.failed,
+            errorMessage: 'Camera streaming failed: $error',
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Future<void> stopStream() {
+    _acceptFrames = false;
+    ++_streamGeneration;
+    return _enqueue(() async {
+      if (_session?.streaming ?? false) await _session!.stop();
+      await _frameJob;
+      if (_session != null) {
+        _emit(const CameraState(status: CameraStatus.ready));
+      }
+    });
+  }
+
+  Future<void> _releaseSession() async {
+    final session = _session;
+    _session = null;
+    if (session == null) return;
     try {
-      await controller.stopImageStream();
-    } on CameraException catch (_) {
-      // The stream may already be torn down. Swallow and move on.
+      if (session.streaming) await session.stop();
+      await _frameJob;
     } finally {
-      _processingFrame = false;
-      if (_state.status != CameraStatus.disposing) {
-        _emit(_state.copyWith(status: CameraStatus.ready));
-      }
+      await session.dispose();
     }
   }
 
-  // -----------------------------------------------------------------
-  // Teardown
-  // -----------------------------------------------------------------
+  /// Release is reusable: screen re-entry can initialize the same service again.
   @override
-  Future<void> dispose() async {
-    _emit(_state.copyWith(status: CameraStatus.disposing));
-    final controller = _controller;
-    _controller = null;
-    if (controller != null) {
+  Future<void> dispose() {
+    ++_generation; // Cancel permission/discovery/initialization immediately.
+    ++_streamGeneration;
+    _acceptFrames = false;
+    return _enqueue(() async {
+      _emit(const CameraState(status: CameraStatus.disposing));
       try {
-        if (controller.value.isStreamingImages) {
-          await controller.stopImageStream();
-        }
-      } catch (_) {
-        /* best effort */
+        await _releaseSession();
+        _emit(const CameraState.idle());
+      } catch (error) {
+        _emit(
+          CameraState(
+            status: CameraStatus.failed,
+            errorMessage: 'Could not release camera: $error',
+          ),
+        );
       }
-      try {
-        await controller.dispose();
-      } catch (_) {
-        /* best effort */
-      }
-    }
-    _processingFrame = false;
-    _isInitializing = false;
-    _emit(const CameraState.idle());
-    await _stateController.close();
+    });
+  }
+
+  Future<void> close() async {
+    _closed = true;
+    await dispose();
+    await _states.close();
   }
 
   @override
-  Future<bool> shouldOpenSettings() async {
-    return Permission.camera.isPermanentlyDenied;
-  }
+  Future<bool> shouldOpenSettings() async =>
+      (await _permissionStatus()).isPermanentlyDenied;
 }

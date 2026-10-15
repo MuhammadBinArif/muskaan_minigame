@@ -91,9 +91,10 @@ class MouthStateMachine {
     if (_isOpen) {
       // Currently open — close when below the closed baseline and minimum open duration has passed.
       if (_smoothed <= config.closedBaseline) {
-        final openFor = _lastTransitionAt == null
-            ? Duration.zero
-            : t.difference(_lastTransitionAt!);
+        final openFor =
+            _lastTransitionAt == null
+                ? Duration.zero
+                : t.difference(_lastTransitionAt!);
         if (openFor >= minimumOpenDuration) {
           _isOpen = false;
           _lastTransitionAt = t;
@@ -127,8 +128,7 @@ class MouthStateMachine {
   /// bleed into the new baseline.
   void updateConfig(CalibrationConfig next) {
     config = next;
-    _smoothed = 0.0;
-    _primed = false;
+    reset();
   }
 
   /// Force the machine into a known state — used after a

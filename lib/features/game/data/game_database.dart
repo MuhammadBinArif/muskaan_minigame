@@ -57,11 +57,24 @@ class GameDatabase extends _$GameDatabase {
 
   // ── Reads ──────────────────────────────────────────────────
   Stream<List<GameRecord>> getAllSessionsStream() =>
-      select(gameRecords).watch();
+      (select(gameRecords)
+            ..where(
+              (t) => t.state.isIn([
+                SessionState.completed.index,
+                SessionState.gameOver.index,
+              ]),
+            )
+            ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
+          .watch();
 
   Future<List<GameRecord>> getCompletedSessions() {
     return (select(gameRecords)
-          ..where((t) => t.state.equals(SessionState.completed.index))
+          ..where(
+            (t) => t.state.isIn([
+              SessionState.completed.index,
+              SessionState.gameOver.index,
+            ]),
+          )
           ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
         .get();
   }
@@ -73,7 +86,12 @@ class GameDatabase extends _$GameDatabase {
 
   Future<GameRecord?> getBestSession() {
     return (select(gameRecords)
-          ..where((t) => t.state.equals(SessionState.completed.index))
+          ..where(
+            (t) => t.state.isIn([
+              SessionState.completed.index,
+              SessionState.gameOver.index,
+            ]),
+          )
           ..orderBy([(t) => OrderingTerm.desc(t.score)])
           ..limit(1))
         .getSingleOrNull();
