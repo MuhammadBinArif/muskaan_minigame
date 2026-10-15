@@ -4,12 +4,14 @@
 // implementation in `data/camera_service_impl.dart` knows about the
 // `camera` package. This lets unit tests use a fake.
 
+import 'dart:async';
+
 import 'package:camera/camera.dart' show CameraImage;
 import 'camera_state.dart';
 
 /// Callback invoked for each camera frame the pipeline decides to keep.
 /// Called on a background isolate where the platform supports it.
-typedef FrameCallback = void Function(CameraImage image);
+typedef FrameCallback = FutureOr<void> Function(CameraImage image);
 
 abstract class CameraService {
   /// Emits lifecycle changes. Consumers watch this to know when
@@ -24,6 +26,9 @@ abstract class CameraService {
 
   /// Sensor orientation in degrees of the active camera.
   int get sensorOrientation;
+
+  /// Rotation needed to present the current camera buffer upright to ML Kit.
+  int get imageRotationDegrees;
 
   /// Whether the service is currently streaming frames.
   bool get isStreaming;

@@ -5,20 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:muskaan_minigame/core/domain/mouth_tracking_result.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/camera/data/camera_service_impl.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_state_machine.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'package:muskaan_minigame/features/tracking/data/vision_sevice_impl.dart';
-
-/// Provider for CameraService abstraction.
-final cameraServiceProvider = Provider<CameraService>((ref) {
-  final service = CameraServiceImpl();
-  ref.onDispose(() {
-    service.dispose();
-  });
-  return service;
-});
 
 /// Provider for VisionService abstraction.
 final visionServiceProvider = Provider<VisionService>((ref) {
@@ -30,8 +21,9 @@ final visionServiceProvider = Provider<VisionService>((ref) {
 });
 
 /// Player's active calibration configuration.
-final calibrationConfigProvider =
-    StateProvider<CalibrationConfig>((ref) => CalibrationConfig.defaults());
+final calibrationConfigProvider = StateProvider<CalibrationConfig>(
+  (ref) => CalibrationConfig.defaults(),
+);
 
 /// Combined mouth tracking state.
 class MouthTrackingState {
@@ -94,20 +86,19 @@ class MouthTrackingState {
     double? fps,
     double? rawOpenness,
     DateTime? lastEventTime,
-  }) =>
-      MouthTrackingState(
-        latestResult: latestResult ?? this.latestResult,
-        latestTransition: latestTransition ?? this.latestTransition,
-        isFaceDetected: isFaceDetected ?? this.isFaceDetected,
-        isCalibrated: isCalibrated ?? this.isCalibrated,
-        isStreaming: isStreaming ?? this.isStreaming,
-        cameraStatus: cameraStatus ?? this.cameraStatus,
-        cameraController: cameraController ?? this.cameraController,
-        error: error ?? this.error,
-        fps: fps ?? this.fps,
-        rawOpenness: rawOpenness ?? this.rawOpenness,
-        lastEventTime: lastEventTime ?? this.lastEventTime,
-      );
+  }) => MouthTrackingState(
+    latestResult: latestResult ?? this.latestResult,
+    latestTransition: latestTransition ?? this.latestTransition,
+    isFaceDetected: isFaceDetected ?? this.isFaceDetected,
+    isCalibrated: isCalibrated ?? this.isCalibrated,
+    isStreaming: isStreaming ?? this.isStreaming,
+    cameraStatus: cameraStatus ?? this.cameraStatus,
+    cameraController: cameraController ?? this.cameraController,
+    error: error ?? this.error,
+    fps: fps ?? this.fps,
+    rawOpenness: rawOpenness ?? this.rawOpenness,
+    lastEventTime: lastEventTime ?? this.lastEventTime,
+  );
 }
 
 /// Controller that binds CameraService + VisionService + MouthStateMachine.
@@ -127,11 +118,11 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
     required VisionService vision,
     required CalibrationConfig config,
     required Ref ref,
-  })  : _camera = camera,
-        _vision = vision,
-        _ref = ref,
-        _stateMachine = MouthStateMachine(config: config),
-        super(MouthTrackingState.initial(config)) {
+  }) : _camera = camera,
+       _vision = vision,
+       _ref = ref,
+       _stateMachine = MouthStateMachine(config: config),
+       super(MouthTrackingState.initial(config)) {
     _cameraSub = _camera.stateStream.listen((camState) {
       if (mounted) {
         state = state.copyWith(
@@ -195,9 +186,9 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
           // Normalized openness between 0.0 and 1.0 based on calibration
           final double normalizedOpenness;
           if (frame.rawOpenness != null && config.deadband > 0) {
-            normalizedOpenness = ((frame.rawOpenness! - config.closedBaseline) /
-                    config.deadband)
-                .clamp(0.0, 1.0);
+            normalizedOpenness =
+                ((frame.rawOpenness! - config.closedBaseline) / config.deadband)
+                    .clamp(0.0, 1.0);
           } else {
             normalizedOpenness = transition.isOpen ? 1.0 : 0.0;
           }
@@ -258,14 +249,14 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
 /// Global provider for MouthTrackingController.
 final mouthTrackingProvider =
     StateNotifierProvider<MouthTrackingController, MouthTrackingState>((ref) {
-  final camera = ref.watch(cameraServiceProvider);
-  final vision = ref.watch(visionServiceProvider);
-  final config = ref.watch(calibrationConfigProvider);
+      final camera = ref.watch(cameraServiceProvider);
+      final vision = ref.watch(visionServiceProvider);
+      final config = ref.watch(calibrationConfigProvider);
 
-  return MouthTrackingController(
-    camera: camera,
-    vision: vision,
-    config: config,
-    ref: ref,
-  );
-});
+      return MouthTrackingController(
+        camera: camera,
+        vision: vision,
+        config: config,
+        ref: ref,
+      );
+    });

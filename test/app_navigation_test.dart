@@ -4,14 +4,35 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:camera/camera.dart';
 import 'package:muskaan_minigame/app/router/app_router.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_result.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_service.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/game/presentation/screen/game_over_screen.dart';
 import 'package:muskaan_minigame/features/home/presentation/screens/home_screen.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'camera/camera_sevice_imple_test.dart';
+
+class NavigationFaceService implements FaceDetectionService {
+  @override
+  Future<FaceDetectionResult> process(
+    CameraImage image, {
+    required int rotationDegrees,
+  }) async {
+    return FaceDetectionResult(
+      faces: const [DetectedFace(boundingBox: Rect.fromLTWH(10, 10, 100, 100))],
+      processedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
 
 void main() {
   /// Pumps the app on a portrait mobile viewport.
@@ -30,6 +51,9 @@ void main() {
         overrides: [
           bestRecordStreamProvider.overrideWith((ref) => Stream.value(null)),
           cameraServiceProvider.overrideWith((ref) => FakeCameraService()),
+          faceDetectionServiceProvider.overrideWith(
+            (ref) => NavigationFaceService(),
+          ),
           visionServiceProvider.overrideWith((ref) => NullVisionService()),
         ],
         child: MaterialApp.router(routerConfig: router),

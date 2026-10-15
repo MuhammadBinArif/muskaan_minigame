@@ -7,10 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:camera/camera.dart' show CameraController, CameraPreview;
-import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
-import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
 
 // ==========================================
 // THEME TOKENS  (unchanged)
@@ -114,9 +114,6 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
   Timer? _stepBiometric;
   Timer? _navTimer;
 
-  // ── Calibration sampling ──
-  final List<double> _baselineSamples = [];
-
   // ── Lifecycle observer ──
   // Tracks whether the app is currently foreground. The nav timer
   // only navigates when this is true; if the timer fires in the
@@ -130,7 +127,7 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
   static const double _innerW = 96;
   static const double _innerH = 64;
 
-  MouthTrackingController? _trackingController;
+  FaceDetectionController? _faceDetectionController;
 
   @override
   void initState() {
@@ -163,16 +160,16 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
     );
 
     // If initial tracking state is already ready, start sequence
-    final initialTrackingState = ref.read(mouthTrackingProvider);
-    if (initialTrackingState.isCameraReady && !initialTrackingState.hasCameraError) {
+    final initialDetectionState = ref.read(faceDetectionProvider);
+    if (initialDetectionState.isFaceDetected) {
       _startCalibrationSequence();
     }
 
     // Start real camera tracking
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _trackingController = ref.read(mouthTrackingProvider.notifier);
-        _trackingController?.startTracking();
+        _faceDetectionController = ref.read(faceDetectionProvider.notifier);
+        _faceDetectionController?.start();
       }
     });
   }
@@ -182,9 +179,9 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      _trackingController?.stopTracking();
+      _faceDetectionController?.stop();
     } else if (state == AppLifecycleState.resumed) {
-      _trackingController?.startTracking();
+      _faceDetectionController?.start();
     }
 
     // If we deferred a navigation while backgrounded, run it now.
@@ -236,24 +233,6 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
         if (!mounted) return;
         _biometricReady.value = true;
 
-        // Establish real baseline and open thresholds if samples collected
-        if (_baselineSamples.isNotEmpty) {
-          final avg =
-              _baselineSamples.reduce((a, b) => a + b) / _baselineSamples.length;
-          final config = CalibrationConfig(
-            closedBaseline: avg,
-            openThreshold: (avg + 0.04).clamp(0.04, 0.4),
-            calibrated: true,
-          );
-          ref.read(calibrationConfigProvider.notifier).state = config;
-          ref.read(mouthTrackingProvider.notifier).updateCalibration(config);
-        } else {
-          // If no samples were acquired (e.g., test or simulated), mark as calibrated with defaults
-          final config = CalibrationConfig.defaults().copyWith(calibrated: true);
-          ref.read(calibrationConfigProvider.notifier).state = config;
-          ref.read(mouthTrackingProvider.notifier).updateCalibration(config);
-        }
-
         // Freeze continuous loops — the screen is done.
         _pulseController.stop();
         _scannerController.stop();
@@ -294,8 +273,9 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
     _lifecycle.dispose();
 
-    // Stop tracking when leaving calibration
-    _trackingController?.stopTracking();
+    // Stop the camera stream when leaving calibration. The provider performs
+    // detector teardown once the screen no longer watches it.
+    _faceDetectionController?.stop();
 
     super.dispose();
   }
@@ -303,14 +283,16 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-    final trackingState = ref.watch(mouthTrackingProvider);
+    final detectionState = ref.watch(faceDetectionProvider);
 
     // Listen to camera status changes to drive calibration sequence
-    ref.listen<MouthTrackingState>(mouthTrackingProvider, (previous, next) {
-      if (next.hasCameraError) {
+    ref.listen<FaceDetectionState>(faceDetectionProvider, (previous, next) {
+      if (next.hasCameraError || next.status == FaceDetectionStatus.error) {
         _cancelCalibrationSequence();
-      } else if (next.isCameraReady && !_sequenceStarted) {
+      } else if (next.isFaceDetected && !_sequenceStarted) {
         _startCalibrationSequence();
+      } else if (!next.isFaceDetected && _sequenceStarted) {
+        _cancelCalibrationSequence();
       }
     });
 
@@ -386,8 +368,8 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
                     outerH: _outerH,
                     innerW: _innerW,
                     innerH: _innerH,
-                    trackingState: trackingState,
-                    onRetry: () => _trackingController?.startTracking(),
+                    detectionState: detectionState,
+                    onRetry: () => _faceDetectionController?.retry(),
                   ),
                 ),
               ),
@@ -427,7 +409,7 @@ class _BiometricTrackingArea extends StatelessWidget {
   final double outerH;
   final double innerW;
   final double innerH;
-  final MouthTrackingState trackingState;
+  final FaceDetectionState detectionState;
   final VoidCallback onRetry;
 
   const _BiometricTrackingArea({
@@ -437,15 +419,56 @@ class _BiometricTrackingArea extends StatelessWidget {
     required this.outerH,
     required this.innerW,
     required this.innerH,
-    required this.trackingState,
+    required this.detectionState,
     required this.onRetry,
   });
 
   Widget _buildCameraFeedOrDiagnostic() {
-    final status = trackingState.cameraStatus;
-    final controller = trackingState.cameraController;
+    final status = detectionState.cameraStatus;
+    final controller = detectionState.cameraController;
 
-    if (trackingState.isCameraReady &&
+    if (detectionState.status == FaceDetectionStatus.error &&
+        !detectionState.hasCameraError) {
+      final errorMsg = detectionState.error ?? 'Face detection failed.';
+      return Semantics(
+        label: 'Face Detection Error: $errorMsg',
+        container: true,
+        child: Container(
+          color: AppColors.cardBg,
+          padding: const EdgeInsets.all(12),
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.face_retouching_off, color: Colors.redAccent),
+              const SizedBox(height: 6),
+              const Text(
+                'Face Detection Error',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                errorMsg,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.helperGrey,
+                  fontSize: 9,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (detectionState.isCameraReady &&
         controller is CameraController &&
         controller.value.isInitialized) {
       return Semantics(
@@ -467,7 +490,8 @@ class _BiometricTrackingArea extends StatelessWidget {
 
     if (status == CameraStatus.permissionDenied) {
       return Semantics(
-        label: 'Camera Permission Denied: Allow camera access for mouth tracking.',
+        label:
+            'Camera Permission Denied: Allow camera access for mouth tracking.',
         container: true,
         child: Container(
           color: AppColors.cardBg,
@@ -509,7 +533,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.progressStart,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       minimumSize: const Size(60, 28),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -517,7 +544,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ),
                     child: const Text(
                       'Grant Access',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -530,7 +560,8 @@ class _BiometricTrackingArea extends StatelessWidget {
 
     if (status == CameraStatus.permissionPermanentlyDenied) {
       return Semantics(
-        label: 'Camera Access Required: Permission permanently denied. Enable in App Settings.',
+        label:
+            'Camera Access Required: Permission permanently denied. Enable in App Settings.',
         container: true,
         child: Container(
           color: AppColors.cardBg,
@@ -572,7 +603,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.dashGreen,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       minimumSize: const Size(60, 28),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -580,7 +614,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ),
                     child: const Text(
                       'Open Settings',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -634,7 +671,7 @@ class _BiometricTrackingArea extends StatelessWidget {
     }
 
     if (status == CameraStatus.failed) {
-      final errorMsg = trackingState.error ?? 'Failed to initialize camera.';
+      final errorMsg = detectionState.error ?? 'Failed to initialize camera.';
       return Semantics(
         label: 'Camera Error: $errorMsg',
         container: true,
@@ -669,7 +706,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.helperGrey, fontSize: 9),
+                  style: const TextStyle(
+                    color: AppColors.helperGrey,
+                    fontSize: 9,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Semantics(
@@ -680,7 +720,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.progressStart,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       minimumSize: const Size(60, 28),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -688,7 +731,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ),
                     child: const Text(
                       'Retry',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -751,11 +797,13 @@ class _BiometricTrackingArea extends StatelessWidget {
               builder: (context, child) =>
                   Opacity(opacity: 0.7 + 0.3 * pulse.value, child: child),
               child: Text(
-                trackingState.isFaceDetected
+                detectionState.hasMultipleFaces
+                    ? 'Multiple Faces Detected'
+                    : detectionState.isFaceDetected
                     ? '✓ Face Detected'
                     : 'Position Your Face',
                 textAlign: TextAlign.center,
-                style: trackingState.isFaceDetected
+                style: detectionState.isFaceDetected
                     ? AppTypography.faceDetected
                     : AppTypography.cardLabel,
               ),

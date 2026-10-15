@@ -25,6 +25,9 @@ class FakeCameraService implements CameraService {
   int get sensorOrientation => 0;
 
   @override
+  int get imageRotationDegrees => 0;
+
+  @override
   dynamic get controller => null;
 
   @override
@@ -43,6 +46,7 @@ class FakeCameraService implements CameraService {
     _callback = onFrame;
     _streaming = true;
     _emit(_state.copyWith(status: CameraStatus.streaming));
+    await onFrame(FakeCameraFrame());
   }
 
   @override
@@ -68,6 +72,8 @@ class FakeCameraService implements CameraService {
   /// Test hook: simulate the platform delivering a frame.
   void simulateFrame(CameraImage image) => _callback?.call(image);
 }
+
+class FakeCameraFrame extends Fake implements CameraImage {}
 
 void main() {
   group('CameraService contract', () {
@@ -148,8 +154,9 @@ void main() {
       const deniedState = CameraState(status: CameraStatus.permissionDenied);
       expect(deniedState.hasPermissionError, isTrue);
 
-      const permDeniedState =
-          CameraState(status: CameraStatus.permissionPermanentlyDenied);
+      const permDeniedState = CameraState(
+        status: CameraStatus.permissionPermanentlyDenied,
+      );
       expect(permDeniedState.hasPermissionError, isTrue);
 
       const failedState = CameraState(status: CameraStatus.failed);
