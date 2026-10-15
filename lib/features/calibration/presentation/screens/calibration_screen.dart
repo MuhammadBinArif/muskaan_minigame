@@ -7,9 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:camera/camera.dart' show CameraController, CameraPreview;
-import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
+import 'package:muskaan_minigame/features/tracking/domain/calibration_session.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 
 // ==========================================
@@ -70,9 +71,6 @@ class AppTypography {
 }
 
 class _Timings {
-  static const Duration faceDetected = Duration(milliseconds: 600);
-  static const Duration lightingReady = Duration(milliseconds: 1300);
-  static const Duration startExtraction = Duration(milliseconds: 1500);
   static const Duration extractionDuration = Duration(milliseconds: 2600);
   static const Duration postCompletionHold = Duration(milliseconds: 400);
   static const Duration pulse = Duration(milliseconds: 1400);
@@ -107,15 +105,13 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
   // ── Sequence state ──
   bool _sequenceStarted = false;
+  final _calibration = CalibrationSession();
+  DateTime? _lastUsableFrame;
+  Timer? _trackingWatchdog;
+  String _instruction = 'Position your face in the camera';
 
   // ── Timers ──
-  Timer? _stepFace;
-  Timer? _stepLighting;
-  Timer? _stepBiometric;
   Timer? _navTimer;
-
-  // ── Calibration sampling ──
-  final List<double> _baselineSamples = [];
 
   // ── Lifecycle observer ──
   // Tracks whether the app is currently foreground. The nav timer
@@ -162,11 +158,14 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
       curve: Curves.easeInOutCubic,
     );
 
-    // If initial tracking state is already ready, start sequence
-    final initialTrackingState = ref.read(mouthTrackingProvider);
-    if (initialTrackingState.isCameraReady && !initialTrackingState.hasCameraError) {
-      _startCalibrationSequence();
-    }
+    _trackingWatchdog = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted || _sequenceStarted) return;
+      if (_lastUsableFrame != null &&
+          DateTime.now().difference(_lastUsableFrame!) >
+              const Duration(seconds: 1)) {
+        _cancelCalibrationSequence();
+      }
+    });
 
     // Start real camera tracking
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -182,7 +181,8 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      _trackingController?.stopTracking();
+      _cancelCalibrationSequence();
+      unawaited(_trackingController?.stopTracking());
     } else if (state == AppLifecycleState.resumed) {
       _trackingController?.startTracking();
     }
@@ -201,87 +201,53 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
   void _cancelCalibrationSequence() {
     _sequenceStarted = false;
-    _stepFace?.cancel();
-    _stepLighting?.cancel();
-    _stepBiometric?.cancel();
     _navTimer?.cancel();
-    _stepFace = null;
-    _stepLighting = null;
-    _stepBiometric = null;
     _navTimer = null;
-    _progressController.reset();
+    _lastUsableFrame = null;
+    _calibration.reset();
+    _progressController.value = 0;
     _faceReady.value = false;
     _lightingReady.value = false;
     _biometricReady.value = false;
+    if (mounted) {
+      setState(() => _instruction = 'Position your face in the camera');
+    }
   }
 
-  void _startCalibrationSequence() {
-    if (_sequenceStarted) return;
+  void _sampleCalibration(MouthTrackingState tracking) {
+    if (_sequenceStarted || !_isForeground) return;
+    if (!tracking.latestResult.isActionable) {
+      _cancelCalibrationSequence();
+      return;
+    }
+    _lastUsableFrame = DateTime.now();
+    _faceReady.value = true;
+    _calibration.add(
+      tracking.rawOpenness,
+      capturedAt: tracking.latestResult.capturedAt,
+    );
+    _lightingReady.value = _calibration.step != CalibrationStep.closed;
+    _progressController.value = _calibration.progress;
+    setState(() => _instruction = _calibration.instruction);
+    final config = _calibration.result;
+    if (config == null) return;
     _sequenceStarted = true;
-
-    _stepFace = Timer(_Timings.faceDetected, () {
+    _biometricReady.value = true;
+    ref.read(calibrationConfigProvider.notifier).state = config;
+    _trackingController?.updateCalibration(config);
+    _navTimer = Timer(_Timings.postCompletionHold, () {
       if (!mounted) return;
-      _faceReady.value = true;
-    });
-
-    _stepLighting = Timer(_Timings.lightingReady, () {
-      if (!mounted) return;
-      _lightingReady.value = true;
-    });
-
-    _stepBiometric = Timer(_Timings.startExtraction, () {
-      if (!mounted) return;
-
-      _progressController.forward().whenCompleteOrCancel(() {
-        if (!mounted) return;
-        _biometricReady.value = true;
-
-        // Establish real baseline and open thresholds if samples collected
-        if (_baselineSamples.isNotEmpty) {
-          final avg =
-              _baselineSamples.reduce((a, b) => a + b) / _baselineSamples.length;
-          final config = CalibrationConfig(
-            closedBaseline: avg,
-            openThreshold: (avg + 0.04).clamp(0.04, 0.4),
-            calibrated: true,
-          );
-          ref.read(calibrationConfigProvider.notifier).state = config;
-          ref.read(mouthTrackingProvider.notifier).updateCalibration(config);
-        } else {
-          // If no samples were acquired (e.g., test or simulated), mark as calibrated with defaults
-          final config = CalibrationConfig.defaults().copyWith(calibrated: true);
-          ref.read(calibrationConfigProvider.notifier).state = config;
-          ref.read(mouthTrackingProvider.notifier).updateCalibration(config);
-        }
-
-        // Freeze continuous loops — the screen is done.
-        _pulseController.stop();
-        _scannerController.stop();
-
-        _navTimer = Timer(_Timings.postCompletionHold, () {
-          if (!mounted) return;
-
-          // 🟢 FIX: Direct navigation. No `addPostFrameCallback` —
-          // that API does not schedule a frame, so it silently hangs
-          // when every animation on the screen has been stopped.
-          // `context.go` schedules its own frame, guaranteeing the
-          // router transition is rendered on the next tick.
-          if (_isForeground) {
-            _navigateAway();
-          } else {
-            // Timer fired while backgrounded — defer until resumed.
-            _pendingNavigation = true;
-          }
-        });
-      });
+      if (_isForeground) {
+        _navigateAway();
+      } else {
+        _pendingNavigation = true;
+      }
     });
   }
 
   @override
   void dispose() {
-    _stepFace?.cancel();
-    _stepLighting?.cancel();
-    _stepBiometric?.cancel();
+    _trackingWatchdog?.cancel();
     _navTimer?.cancel();
 
     _progressController.dispose();
@@ -305,12 +271,11 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
     final trackingState = ref.watch(mouthTrackingProvider);
 
-    // Listen to camera status changes to drive calibration sequence
     ref.listen<MouthTrackingState>(mouthTrackingProvider, (previous, next) {
-      if (next.hasCameraError) {
+      if (next.hasCameraError || !next.isStreaming) {
         _cancelCalibrationSequence();
-      } else if (next.isCameraReady && !_sequenceStarted) {
-        _startCalibrationSequence();
+      } else if (previous?.latestResult != next.latestResult) {
+        _sampleCalibration(next);
       }
     });
 
@@ -387,8 +352,32 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
                     innerW: _innerW,
                     innerH: _innerH,
                     trackingState: trackingState,
-                    onRetry: () => _trackingController?.startTracking(),
+                    onRetry: () {
+                      _cancelCalibrationSequence();
+                      _trackingController?.startTracking();
+                    },
                   ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 20,
+              right: 20,
+              top: MediaQuery.paddingOf(context).top + 60,
+              child: Semantics(
+                liveRegion: true,
+                child: Column(
+                  children: [
+                    Text(
+                      _instruction,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                    TextButton(
+                      onPressed: _cancelCalibrationSequence,
+                      child: const Text('Retry calibration'),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -467,7 +456,8 @@ class _BiometricTrackingArea extends StatelessWidget {
 
     if (status == CameraStatus.permissionDenied) {
       return Semantics(
-        label: 'Camera Permission Denied: Allow camera access for mouth tracking.',
+        label:
+            'Camera Permission Denied: Allow camera access for mouth tracking.',
         container: true,
         child: Container(
           color: AppColors.cardBg,
@@ -509,7 +499,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.progressStart,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       minimumSize: const Size(60, 28),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -517,7 +510,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ),
                     child: const Text(
                       'Grant Access',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -530,7 +526,8 @@ class _BiometricTrackingArea extends StatelessWidget {
 
     if (status == CameraStatus.permissionPermanentlyDenied) {
       return Semantics(
-        label: 'Camera Access Required: Permission permanently denied. Enable in App Settings.',
+        label:
+            'Camera Access Required: Permission permanently denied. Enable in App Settings.',
         container: true,
         child: Container(
           color: AppColors.cardBg,
@@ -572,7 +569,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.dashGreen,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       minimumSize: const Size(60, 28),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -580,7 +580,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ),
                     child: const Text(
                       'Open Settings',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -669,7 +672,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.helperGrey, fontSize: 9),
+                  style: const TextStyle(
+                    color: AppColors.helperGrey,
+                    fontSize: 9,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Semantics(
@@ -680,7 +686,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.progressStart,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       minimumSize: const Size(60, 28),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -688,7 +697,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ),
                     child: const Text(
                       'Retry',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -748,16 +760,18 @@ class _BiometricTrackingArea extends StatelessWidget {
             right: 0,
             child: AnimatedBuilder(
               animation: pulse,
-              builder: (context, child) =>
-                  Opacity(opacity: 0.7 + 0.3 * pulse.value, child: child),
+              builder:
+                  (context, child) =>
+                      Opacity(opacity: 0.7 + 0.3 * pulse.value, child: child),
               child: Text(
                 trackingState.isFaceDetected
                     ? '✓ Face Detected'
                     : 'Position Your Face',
                 textAlign: TextAlign.center,
-                style: trackingState.isFaceDetected
-                    ? AppTypography.faceDetected
-                    : AppTypography.cardLabel,
+                style:
+                    trackingState.isFaceDetected
+                        ? AppTypography.faceDetected
+                        : AppTypography.cardLabel,
               ),
             ),
           ),
@@ -832,12 +846,13 @@ class _BiometricTrackingArea extends StatelessWidget {
                     child: ClipOval(
                       child: AnimatedBuilder(
                         animation: scanner,
-                        builder: (context, _) => CustomPaint(
-                          painter: _LaserSweepPainter(
-                            progress: scanner.value,
-                            laserColor: AppColors.scanLaser,
-                          ),
-                        ),
+                        builder:
+                            (context, _) => CustomPaint(
+                              painter: _LaserSweepPainter(
+                                progress: scanner.value,
+                                laserColor: AppColors.scanLaser,
+                              ),
+                            ),
                       ),
                     ),
                   ),
@@ -899,20 +914,25 @@ class _BottomSheet extends StatelessWidget {
           // rebuilds when its state flips.
           ValueListenableBuilder<bool>(
             valueListenable: faceReady,
-            builder: (_, ready, _) =>
-                _StatusCard(label: 'Face Position', isReady: ready),
+            builder:
+                (_, ready, _) =>
+                    _StatusCard(label: 'Face Position', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: lightingReady,
-            builder: (_, ready, _) =>
-                _StatusCard(label: 'Lighting', isReady: ready),
+            builder:
+                (_, ready, _) =>
+                    _StatusCard(label: 'Closed-mouth baseline', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: biometricReady,
-            builder: (_, ready, _) =>
-                _StatusCard(label: 'Biometric Features', isReady: ready),
+            builder:
+                (_, ready, _) => _StatusCard(
+                  label: 'Open and close verified',
+                  isReady: ready,
+                ),
           ),
           const SizedBox(height: 16),
 
@@ -932,8 +952,8 @@ class _BottomSheet extends StatelessWidget {
               final pct = (progress.value * 100).toInt();
               return Text(
                 progress.value >= 1.0
-                    ? 'Extraction complete!'
-                    : 'Extracting landmarks ($pct%)...',
+                    ? 'Calibration complete!'
+                    : 'Measuring mouth movement ($pct%)...',
                 style: AppTypography.helper,
                 textAlign: TextAlign.center,
               );
@@ -962,9 +982,10 @@ class _StatusCard extends StatelessWidget {
         color: AppColors.cardBg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isReady
-              ? AppColors.readyGreen.withValues(alpha: 0.3)
-              : Colors.transparent,
+          color:
+              isReady
+                  ? AppColors.readyGreen.withValues(alpha: 0.3)
+                  : Colors.transparent,
           width: 1,
         ),
       ),
@@ -989,9 +1010,10 @@ class _StatusCard extends StatelessWidget {
             child: Text(
               isReady ? 'Ready' : 'Analyzing…',
               key: ValueKey<bool>(isReady),
-              style: isReady
-                  ? AppTypography.statusReady
-                  : AppTypography.statusChecking,
+              style:
+                  isReady
+                      ? AppTypography.statusReady
+                      : AppTypography.statusChecking,
             ),
           ),
         ],
@@ -1092,12 +1114,13 @@ class _ScanningReticlePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..isAntiAlias = true
-      ..color = color.withValues(alpha: 0.45)
-      ..strokeWidth = 1.8
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+    final paint =
+        Paint()
+          ..isAntiAlias = true
+          ..color = color.withValues(alpha: 0.45)
+          ..strokeWidth = 1.8
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke;
 
     const corner = 14.0;
     const pad = -8.0;

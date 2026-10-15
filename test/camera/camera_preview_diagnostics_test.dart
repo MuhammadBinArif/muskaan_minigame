@@ -7,6 +7,7 @@ import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/features/calibration/presentation/screens/calibration_screen.dart';
 import 'package:muskaan_minigame/features/game/presentation/screen/gameplay_screen.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
+import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 
 class DiagnosticFakeCameraService implements CameraService {
@@ -46,7 +47,10 @@ class DiagnosticFakeCameraService implements CameraService {
   Future<void> initialize() async {}
 
   @override
-  Future<void> startStream({required FrameCallback onFrame, int maxFps = 15}) async {
+  Future<void> startStream({
+    required FrameCallback onFrame,
+    int maxFps = 15,
+  }) async {
     if (autoStream) {
       emit(const CameraState(status: CameraStatus.streaming));
     }
@@ -70,11 +74,18 @@ class DiagnosticFakeCameraService implements CameraService {
 
 void main() {
   group('Camera state diagnostics in CalibrationScreen', () {
-    testWidgets('renders permission denied card with Grant Access button',
-        (tester) async {
+    testWidgets('renders permission denied card with Grant Access button', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            calibrationConfigProvider.overrideWith(
+              (ref) => const CalibrationConfig(
+                closedBaseline: .02,
+                openThreshold: .08,
+              ),
+            ),
             mouthTrackingProvider.overrideWith((ref) {
               return MouthTrackingController(
                 camera: DiagnosticFakeCameraService(
@@ -83,15 +94,13 @@ void main() {
                     errorMessage: 'Permission denied',
                   ),
                 ),
-                vision: ref.watch(visionServiceProvider),
+                vision: NullVisionService(),
                 config: CalibrationConfig.defaults(),
                 ref: ref,
               );
             }),
           ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
-          ),
+          child: const MaterialApp(home: CalibrationScreen()),
         ),
       );
 
@@ -101,41 +110,53 @@ void main() {
       expect(find.text('Grant Access'), findsOneWidget);
     });
 
-    testWidgets('renders permission permanently denied card with Open Settings button',
-        (tester) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            mouthTrackingProvider.overrideWith((ref) {
-              return MouthTrackingController(
-                camera: DiagnosticFakeCameraService(
-                  initialState: const CameraState(
-                    status: CameraStatus.permissionPermanentlyDenied,
-                    errorMessage: 'Settings required',
-                  ),
+    testWidgets(
+      'renders permission permanently denied card with Open Settings button',
+      (tester) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              calibrationConfigProvider.overrideWith(
+                (ref) => const CalibrationConfig(
+                  closedBaseline: .02,
+                  openThreshold: .08,
                 ),
-                vision: ref.watch(visionServiceProvider),
-                config: CalibrationConfig.defaults(),
-                ref: ref,
-              );
-            }),
-          ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
+              ),
+              mouthTrackingProvider.overrideWith((ref) {
+                return MouthTrackingController(
+                  camera: DiagnosticFakeCameraService(
+                    initialState: const CameraState(
+                      status: CameraStatus.permissionPermanentlyDenied,
+                      errorMessage: 'Settings required',
+                    ),
+                  ),
+                  vision: NullVisionService(),
+                  config: CalibrationConfig.defaults(),
+                  ref: ref,
+                );
+              }),
+            ],
+            child: const MaterialApp(home: CalibrationScreen()),
           ),
-        ),
-      );
+        );
 
-      await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('Camera Access Required'), findsOneWidget);
-      expect(find.text('Open Settings'), findsOneWidget);
-    });
+        expect(find.text('Camera Access Required'), findsOneWidget);
+        expect(find.text('Open Settings'), findsOneWidget);
+      },
+    );
 
     testWidgets('renders no front camera diagnostic card', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            calibrationConfigProvider.overrideWith(
+              (ref) => const CalibrationConfig(
+                closedBaseline: .02,
+                openThreshold: .08,
+              ),
+            ),
             mouthTrackingProvider.overrideWith((ref) {
               return MouthTrackingController(
                 camera: DiagnosticFakeCameraService(
@@ -144,15 +165,13 @@ void main() {
                     errorMessage: 'No front camera found',
                   ),
                 ),
-                vision: ref.watch(visionServiceProvider),
+                vision: NullVisionService(),
                 config: CalibrationConfig.defaults(),
                 ref: ref,
               );
             }),
           ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
-          ),
+          child: const MaterialApp(home: CalibrationScreen()),
         ),
       );
 
@@ -161,11 +180,18 @@ void main() {
       expect(find.text('No Front Camera'), findsOneWidget);
     });
 
-    testWidgets('renders error card with Retry button on camera failure',
-        (tester) async {
+    testWidgets('renders error card with Retry button on camera failure', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            calibrationConfigProvider.overrideWith(
+              (ref) => const CalibrationConfig(
+                closedBaseline: .02,
+                openThreshold: .08,
+              ),
+            ),
             mouthTrackingProvider.overrideWith((ref) {
               return MouthTrackingController(
                 camera: DiagnosticFakeCameraService(
@@ -174,15 +200,13 @@ void main() {
                     errorMessage: 'Hardware sensor unavailable',
                   ),
                 ),
-                vision: ref.watch(visionServiceProvider),
+                vision: NullVisionService(),
                 config: CalibrationConfig.defaults(),
                 ref: ref,
               );
             }),
           ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
-          ),
+          child: const MaterialApp(home: CalibrationScreen()),
         ),
       );
 
@@ -193,48 +217,55 @@ void main() {
       expect(find.text('Retry'), findsOneWidget);
     });
 
-    testWidgets('provides accessible screen reader labels for diagnostic states and buttons',
-        (tester) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            mouthTrackingProvider.overrideWith((ref) {
-              return MouthTrackingController(
-                camera: DiagnosticFakeCameraService(
-                  initialState: const CameraState(
-                    status: CameraStatus.permissionDenied,
-                    errorMessage: 'Permission denied',
-                  ),
+    testWidgets(
+      'provides accessible screen reader labels for diagnostic states and buttons',
+      (tester) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              calibrationConfigProvider.overrideWith(
+                (ref) => const CalibrationConfig(
+                  closedBaseline: .02,
+                  openThreshold: .08,
                 ),
-                vision: ref.watch(visionServiceProvider),
-                config: CalibrationConfig.defaults(),
-                ref: ref,
-              );
-            }),
-          ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
+              ),
+              mouthTrackingProvider.overrideWith((ref) {
+                return MouthTrackingController(
+                  camera: DiagnosticFakeCameraService(
+                    initialState: const CameraState(
+                      status: CameraStatus.permissionDenied,
+                      errorMessage: 'Permission denied',
+                    ),
+                  ),
+                  vision: NullVisionService(),
+                  config: CalibrationConfig.defaults(),
+                  ref: ref,
+                );
+              }),
+            ],
+            child: const MaterialApp(home: CalibrationScreen()),
           ),
-        ),
-      );
+        );
 
-      await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 100));
 
-      expect(
-        find.bySemanticsLabel('Grant camera access'),
-        findsOneWidget,
-      );
-      expect(
-        find.bySemanticsLabel('Exit calibration'),
-        findsOneWidget,
-      );
-    });
+        expect(find.bySemanticsLabel('Grant camera access'), findsOneWidget);
+        expect(find.bySemanticsLabel('Exit calibration'), findsOneWidget);
+      },
+    );
 
-    testWidgets('renders exit button and handles back navigation cleanly',
-        (tester) async {
+    testWidgets('renders exit button and handles back navigation cleanly', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            calibrationConfigProvider.overrideWith(
+              (ref) => const CalibrationConfig(
+                closedBaseline: .02,
+                openThreshold: .08,
+              ),
+            ),
             mouthTrackingProvider.overrideWith((ref) {
               return MouthTrackingController(
                 camera: DiagnosticFakeCameraService(
@@ -243,15 +274,13 @@ void main() {
                     errorMessage: 'Camera error',
                   ),
                 ),
-                vision: ref.watch(visionServiceProvider),
+                vision: NullVisionService(),
                 config: CalibrationConfig.defaults(),
                 ref: ref,
               );
             }),
           ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
-          ),
+          child: const MaterialApp(home: CalibrationScreen()),
         ),
       );
 
@@ -263,11 +292,18 @@ void main() {
       await tester.pump();
     });
 
-    testWidgets('renders loading semantics when camera is initializing',
-        (tester) async {
+    testWidgets('renders loading semantics when camera is initializing', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            calibrationConfigProvider.overrideWith(
+              (ref) => const CalibrationConfig(
+                closedBaseline: .02,
+                openThreshold: .08,
+              ),
+            ),
             mouthTrackingProvider.overrideWith((ref) {
               return MouthTrackingController(
                 camera: DiagnosticFakeCameraService(
@@ -276,15 +312,13 @@ void main() {
                   ),
                   autoStream: false,
                 ),
-                vision: ref.watch(visionServiceProvider),
+                vision: NullVisionService(),
                 config: CalibrationConfig.defaults(),
                 ref: ref,
               );
             }),
           ],
-          child: const MaterialApp(
-            home: CalibrationScreen(),
-          ),
+          child: const MaterialApp(home: CalibrationScreen()),
         ),
       );
 
@@ -292,7 +326,9 @@ void main() {
 
       expect(
         find.byWidgetPredicate(
-          (w) => w is Semantics && w.properties.label == 'Initializing camera feed',
+          (w) =>
+              w is Semantics &&
+              w.properties.label == 'Initializing camera feed',
         ),
         findsOneWidget,
       );
@@ -301,8 +337,9 @@ void main() {
   });
 
   group('Mouth state label feedback in GameplayScreen', () {
-    testWidgets('shows OPEN MOUTH when closed and MOUTH OPEN when open',
-        (tester) async {
+    testWidgets('shows OPEN MOUTH when closed and MOUTH OPEN when open', (
+      tester,
+    ) async {
       final fakeCamera = DiagnosticFakeCameraService(
         initialState: const CameraState(status: CameraStatus.ready),
       );
@@ -310,11 +347,15 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            calibrationConfigProvider.overrideWith(
+              (ref) => const CalibrationConfig(
+                closedBaseline: .02,
+                openThreshold: .08,
+              ),
+            ),
             cameraServiceProvider.overrideWithValue(fakeCamera),
           ],
-          child: const MaterialApp(
-            home: GameplayScreen(),
-          ),
+          child: const MaterialApp(home: GameplayScreen()),
         ),
       );
 

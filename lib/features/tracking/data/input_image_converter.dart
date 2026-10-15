@@ -20,6 +20,11 @@ InputImage buildInputImage({
   required CameraImage image,
   required int rotationDegrees,
 }) {
+  if (image.planes.length != 1) {
+    throw ArgumentError(
+      'Expected a single-plane NV21 or BGRA8888 frame; received ${image.planes.length} planes.',
+    );
+  }
   final rotation =
       InputImageRotationValue.fromRawValue(rotationDegrees) ??
       InputImageRotation.rotation0deg;
@@ -31,8 +36,8 @@ InputImage buildInputImage({
     bytesPerRow: image.planes.first.bytesPerRow,
   );
 
-  // Concatenate all planes — needed for YUV layouts where ML Kit
-  // expects a single NV21-style buffer.
+  // NV21 and BGRA8888 must be delivered as one packed plane.
+  // Concatenating arbitrary YUV planes would corrupt pixel/row strides.
   final bytes = _concatenatePlanes(image);
 
   return InputImage.fromBytes(bytes: bytes, metadata: metadata);
@@ -45,7 +50,9 @@ InputImageFormat _formatFor(CameraImage image) {
     case ImageFormatGroup.nv21:
       return InputImageFormat.nv21;
     case ImageFormatGroup.yuv420:
-      return InputImageFormat.yuv420;
+      throw ArgumentError(
+        'YUV420 requires explicit stride-aware NV21 conversion; configure NV21 camera output.',
+      );
     case ImageFormatGroup.bgra8888:
       return InputImageFormat.bgra8888;
     case ImageFormatGroup.jpeg:
@@ -57,8 +64,7 @@ InputImageFormat _formatFor(CameraImage image) {
 
 /// Concatenate the image planes into a single contiguous buffer.
 ///
-/// For NV21 there is a single plane so this is a no-op. For YUV420
-/// and BGRA8888 we join the planes end-to-end.
+/// Validation above guarantees a supported packed single-plane format.
 Uint8List _concatenatePlanes(CameraImage image) {
   if (image.planes.length == 1) {
     return image.planes[0].bytes;

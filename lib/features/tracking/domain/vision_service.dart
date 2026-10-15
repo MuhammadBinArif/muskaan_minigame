@@ -27,7 +27,7 @@ class VisionFrame {
   /// True if a usable face was detected in this frame.
   final bool faceDetected;
 
-  /// Server-side timestamp.
+  /// On-device capture/processing timestamp.
   final DateTime capturedAt;
 
   const VisionFrame({
@@ -51,8 +51,8 @@ class VisionFrame {
 abstract class VisionService {
   /// Process one camera frame.
   ///
-  /// Never throws — always returns a frame; errors are logged and
-  /// result in a `noFace` frame.
+  /// Returns noFace for valid frames without a usable face.
+  /// Processing/configuration errors propagate to camera diagnostics.
   Future<VisionFrame> process(
     CameraImage image, {
     required int rotationDegrees,

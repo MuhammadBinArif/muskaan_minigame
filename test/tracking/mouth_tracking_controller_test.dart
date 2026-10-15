@@ -129,7 +129,10 @@ void main() {
       expect(machine.isOpen, isTrue);
 
       // Next frame with same openness should NOT trigger justOpened again
-      final t2 = machine.update(0.20, now: now.add(const Duration(milliseconds: 50)));
+      final t2 = machine.update(
+        0.20,
+        now: now.add(const Duration(milliseconds: 50)),
+      );
       expect(t2.isOpen, isTrue);
       expect(t2.justOpened, isFalse);
       expect(t2.justClosed, isFalse);
@@ -140,12 +143,18 @@ void main() {
       machine.update(0.20, now: now);
 
       // Attempt to close before 100ms
-      final fastClose = machine.update(0.02, now: now.add(const Duration(milliseconds: 50)));
+      final fastClose = machine.update(
+        0.02,
+        now: now.add(const Duration(milliseconds: 50)),
+      );
       expect(fastClose.isOpen, isTrue); // Held open by minimumOpenDuration
       expect(fastClose.justClosed, isFalse);
 
       // Attempt to close after 150ms
-      final normalClose = machine.update(0.02, now: now.add(const Duration(milliseconds: 150)));
+      final normalClose = machine.update(
+        0.02,
+        now: now.add(const Duration(milliseconds: 150)),
+      );
       expect(normalClose.isOpen, isFalse);
       expect(normalClose.justClosed, isTrue);
       expect(machine.isOpen, isFalse);
@@ -172,12 +181,14 @@ void main() {
         overrides: [
           cameraServiceProvider.overrideWithValue(mockCamera),
           visionServiceProvider.overrideWithValue(mockVision),
-          calibrationConfigProvider.overrideWith((ref) => const CalibrationConfig(
-                closedBaseline: 0.05,
-                openThreshold: 0.15,
-                faceConfidenceFloor: 0.5,
-                calibrated: true,
-              )),
+          calibrationConfigProvider.overrideWith(
+            (ref) => const CalibrationConfig(
+              closedBaseline: 0.05,
+              openThreshold: 0.15,
+              faceConfidenceFloor: 0.5,
+              calibrated: true,
+            ),
+          ),
         ],
       );
     });
@@ -228,7 +239,10 @@ void main() {
       expect(updatedState.isFaceDetected, isTrue);
       expect(updatedState.latestResult.faceDetected, isTrue);
       expect(updatedState.latestResult.confidence, 0.98);
-      expect(updatedState.latestResult.normalizedPosition, const Offset(0.5, 0.6));
+      expect(
+        updatedState.latestResult.normalizedPosition,
+        const Offset(0.5, 0.6),
+      );
       expect(updatedState.latestResult.openness, greaterThan(0.0));
       expect(updatedState.latestTransition.isOpen, isTrue);
       expect(updatedState.latestTransition.justOpened, isTrue);
@@ -241,90 +255,102 @@ void main() {
 
     test('updateCalibration changes calibrated status', () {
       final controller = container.read(mouthTrackingProvider.notifier);
-      controller.updateCalibration(const CalibrationConfig(
-        closedBaseline: 0.04,
-        openThreshold: 0.12,
-        faceConfidenceFloor: 0.5,
-        calibrated: false,
-      ));
+      controller.updateCalibration(
+        const CalibrationConfig(
+          closedBaseline: 0.04,
+          openThreshold: 0.12,
+          faceConfidenceFloor: 0.5,
+          calibrated: false,
+        ),
+      );
 
       expect(container.read(mouthTrackingProvider).isCalibrated, isFalse);
     });
   });
 
   group('GameSessionNotifier continuous mouth tracking integration', () {
-    test('open mouth catches edible food in mouth zone and increases score and combo', () {
-      final notifier = GameSessionNotifier();
-      notifier.startGame();
+    test(
+      'open mouth catches edible food in mouth zone and increases score and combo',
+      () {
+        final notifier = GameSessionNotifier();
+        addTearDown(notifier.dispose);
+        notifier.startGame();
 
-      // Seed an edible food right in the mouth zone (0.5, 0.52)
-      final food = const FoodItem(
-        type: FoodItemType.gold,
-        positionX: 0.5,
-        positionY: 0.52,
-        velocityX: 0,
-        velocityY: 0.01,
-        size: 0.08,
-        creationTime: 0,
-      );
-      notifier.state = notifier.state.copyWith(activeFoods: [food]);
+        // Seed an edible food right in the mouth zone (0.5, 0.52)
+        final food = const FoodItem(
+          type: FoodItemType.gold,
+          positionX: 0.5,
+          positionY: 0.52,
+          velocityX: 0,
+          velocityY: 0.01,
+          size: 0.08,
+          creationTime: 0,
+        );
+        notifier.state = notifier.state.copyWith(activeFoods: [food]);
 
-      expect(notifier.state.stats.score, 0);
-      expect(notifier.state.stats.combo, 0);
+        expect(notifier.state.stats.score, 0);
+        expect(notifier.state.stats.combo, 0);
 
-      // Trigger continuous mouth tracking while mouth is open
-      notifier.updateMouthTracking(
-        isOpen: true,
-        isActionable: true,
-        mouthX: 0.5,
-        mouthY: 0.52,
-      );
+        // Trigger continuous mouth tracking while mouth is open
+        notifier.updateMouthTracking(
+          isOpen: true,
+          isActionable: true,
+          mouthX: 0.5,
+          mouthY: 0.52,
+        );
 
-      expect(notifier.state.stats.score, 100);
-      expect(notifier.state.stats.combo, 1);
-      expect(notifier.state.stats.catches, 1);
-      expect(notifier.state.activeFoods, isEmpty);
-      expect(notifier.state.stats.lives, 3);
-    });
+        expect(notifier.state.stats.score, 100);
+        expect(notifier.state.stats.combo, 1);
+        expect(notifier.state.stats.catches, 1);
+        expect(notifier.state.activeFoods, isEmpty);
+        expect(notifier.state.stats.lives, 3);
+      },
+    );
 
-    test('open mouth catching hot tea hazard costs a life and resets combo', () {
-      final notifier = GameSessionNotifier();
-      notifier.startGame();
+    test(
+      'open mouth catching hot tea hazard costs a life and resets combo',
+      () {
+        final notifier = GameSessionNotifier();
+        addTearDown(notifier.dispose);
+        notifier.startGame();
 
-      // First score a combo
-      final gold = const FoodItem(
-        type: FoodItemType.gold,
-        positionX: 0.5,
-        positionY: 0.52,
-        velocityX: 0,
-        velocityY: 0.01,
-        size: 0.08,
-        creationTime: 0,
-      );
-      notifier.state = notifier.state.copyWith(activeFoods: [gold]);
-      notifier.updateMouthTracking(isOpen: true, isActionable: true);
-      expect(notifier.state.stats.combo, 1);
+        // First score a combo
+        final gold = const FoodItem(
+          type: FoodItemType.gold,
+          positionX: 0.5,
+          positionY: 0.52,
+          velocityX: 0,
+          velocityY: 0.01,
+          size: 0.08,
+          creationTime: 0,
+        );
+        notifier.state = notifier.state.copyWith(activeFoods: [gold]);
+        notifier.updateMouthTracking(isOpen: true, isActionable: true);
+        expect(notifier.state.stats.combo, 1);
 
-      // Now hit a tea hazard
-      final tea = const FoodItem(
-        type: FoodItemType.tea,
-        positionX: 0.5,
-        positionY: 0.52,
-        velocityX: 0,
-        velocityY: 0.01,
-        size: 0.08,
-        creationTime: 0,
-      );
-      notifier.state = notifier.state.copyWith(activeFoods: [tea]);
-      notifier.updateMouthTracking(isOpen: true, isActionable: true);
+        notifier.updateMouthTracking(isOpen: false, isActionable: true);
+        // Now hit a tea hazard
+        final tea = const FoodItem(
+          type: FoodItemType.tea,
+          positionX: 0.5,
+          positionY: 0.52,
+          velocityX: 0,
+          velocityY: 0.01,
+          size: 0.08,
+          creationTime: 0,
+        );
+        notifier.state = notifier.state.copyWith(activeFoods: [tea]);
+        notifier.updateMouthTracking(isOpen: true, isActionable: true);
 
-      expect(notifier.state.stats.lives, 2);
-      expect(notifier.state.stats.combo, 0);
-      expect(notifier.state.activeFoods, isEmpty);
-    });
+        expect(notifier.state.stats.lives, 2);
+        expect(notifier.state.stats.combo, 0);
+        expect(notifier.state.activeFoods, isEmpty);
+      },
+    );
 
     test('closed mouth does not catch food in mouth zone', () {
       final notifier = GameSessionNotifier();
+      addTearDown(notifier.dispose);
       notifier.startGame();
 
       final food = const FoodItem(
@@ -351,6 +377,7 @@ void main() {
 
     test('non-actionable or invalid tracking is safely ignored', () {
       final notifier = GameSessionNotifier();
+      addTearDown(notifier.dispose);
       notifier.startGame();
 
       final food = const FoodItem(
@@ -376,4 +403,3 @@ void main() {
     });
   });
 }
-
