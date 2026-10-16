@@ -3,8 +3,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
-import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
@@ -277,6 +277,7 @@ void main() {
       'open mouth catches edible food in mouth zone and increases score and combo',
       () {
         final notifier = GameSessionNotifier();
+        addTearDown(notifier.dispose);
         notifier.startGame();
 
         // Seed an edible food right in the mouth zone (0.5, 0.52)
@@ -314,6 +315,7 @@ void main() {
       'open mouth catching hot tea hazard costs a life and resets combo',
       () {
         final notifier = GameSessionNotifier();
+        addTearDown(notifier.dispose);
         notifier.startGame();
 
         // First score a combo
@@ -330,6 +332,7 @@ void main() {
         notifier.updateMouthTracking(isOpen: true, isActionable: true);
         expect(notifier.state.stats.combo, 1);
 
+        notifier.updateMouthTracking(isOpen: false, isActionable: true);
         // Now hit a tea hazard
         final tea = const FoodItem(
           type: FoodItemType.tea,
@@ -351,6 +354,7 @@ void main() {
 
     test('closed mouth does not catch food in mouth zone', () {
       final notifier = GameSessionNotifier();
+      addTearDown(notifier.dispose);
       notifier.startGame();
 
       final food = const FoodItem(
@@ -377,6 +381,7 @@ void main() {
 
     test('non-actionable or invalid tracking is safely ignored', () {
       final notifier = GameSessionNotifier();
+      addTearDown(notifier.dispose);
       notifier.startGame();
 
       final food = const FoodItem(

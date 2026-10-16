@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/domain/game_session.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import '../../../../shared/widgets/app_bottom_nav.dart';
 
 // ==========================================
@@ -88,13 +90,13 @@ class AppTypography {
 // ==========================================
 // RESULTS SCREEN
 // ==========================================
-class ResultsScreen extends StatelessWidget {
+class ResultsScreen extends ConsumerWidget {
   final GameSessionRecord? gameRecord;
 
   const ResultsScreen({super.key, this.gameRecord});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final record = gameRecord ?? _emptyRecord();
 
     return Scaffold(
@@ -109,7 +111,24 @@ class ResultsScreen extends StatelessWidget {
         ),
         child: SafeArea(
           bottom: false,
-          child: _ResultsBody(record: record, isNewBest: record.isNewBest),
+          child: _ResultsBody(
+            record: record,
+            isNewBest: record.isNewBest,
+            onPlayAgain: () {
+              final session = ref.read(gameSessionProvider);
+              if (session.isSaving || session.saveError != null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Save this result before starting another round. Use Retry save if needed.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              context.go('/countdown');
+            },
+          ),
         ),
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 2),
@@ -134,9 +153,14 @@ class ResultsScreen extends StatelessWidget {
 // ==========================================
 class _ResultsBody extends StatefulWidget {
   final GameSessionRecord record;
+  final VoidCallback onPlayAgain;
   final bool isNewBest;
 
-  const _ResultsBody({required this.record, required this.isNewBest});
+  const _ResultsBody({
+    required this.record,
+    required this.isNewBest,
+    required this.onPlayAgain,
+  });
 
   @override
   State<_ResultsBody> createState() => _ResultsBodyState();
@@ -421,7 +445,7 @@ class _ResultsBodyState extends State<_ResultsBody>
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => context.go('/countdown'),
+          onTap: widget.onPlayAgain,
           child: const Center(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,

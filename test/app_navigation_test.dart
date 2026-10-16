@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,6 +50,12 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          calibrationConfigProvider.overrideWith(
+            (ref) => const CalibrationConfig(
+              closedBaseline: .02,
+              openThreshold: .08,
+            ),
+          ),
           bestRecordStreamProvider.overrideWith((ref) => Stream.value(null)),
           cameraServiceProvider.overrideWith((ref) => FakeCameraService()),
           faceDetectionServiceProvider.overrideWith(
@@ -220,21 +227,18 @@ void main() {
       expect(find.text('Welcome to'), findsOneWidget);
     });
 
-    testWidgets(
-      'Full camera flow: Permission → Calibration → Home First Time',
-      (tester) async {
-        await pumpApp(tester, '/camera-permission');
+    testWidgets('Full camera flow reaches Home First Time', (tester) async {
+      await pumpApp(tester, '/camera-permission');
 
-        await tapAndAdvance(tester, find.text('CONTINUE'));
-        expect(find.text('Face Position'), findsOneWidget);
+      await tapAndAdvance(tester, find.text('CONTINUE'));
+      expect(find.text('Face Position'), findsOneWidget);
 
-        for (int i = 0; i < 12; i++) {
-          await tester.pump(const Duration(milliseconds: 500));
-        }
+      for (int i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 500));
+      }
 
-        expect(find.text('Welcome to'), findsOneWidget);
-      },
-    );
+      expect(find.text('Welcome to'), findsOneWidget);
+    });
   });
 
   // ================================================================
@@ -540,29 +544,30 @@ void main() {
   // END-TO-END FLOWS (verify the ordered 01 → 13 pipeline)
   // ================================================================
   group('End-to-end flows', () {
-    testWidgets('New user: tutorial → camera → calibration → Home First Time', (
-      tester,
-    ) async {
-      await pumpApp(tester, '/how-to-play/step1');
+    testWidgets(
+      'New user completes face detection before continuing',
+      (tester) async {
+        await pumpApp(tester, '/how-to-play/step1');
 
-      await tapAndAdvance(tester, find.text('NEXT'));
-      expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
+        await tapAndAdvance(tester, find.text('NEXT'));
+        expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
 
-      await tapAndAdvance(tester, find.text('NEXT'));
-      expect(find.text('Build Combos, Avoid Hazards'), findsOneWidget);
+        await tapAndAdvance(tester, find.text('NEXT'));
+        expect(find.text('Build Combos, Avoid Hazards'), findsOneWidget);
 
-      await tapAndAdvance(tester, find.text('START CAMERA SETUP'));
-      expect(find.text('Camera Access'), findsOneWidget);
+        await tapAndAdvance(tester, find.text('START CAMERA SETUP'));
+        expect(find.text('Camera Access'), findsOneWidget);
 
-      await tapAndAdvance(tester, find.text('CONTINUE'));
-      expect(find.text('Face Position'), findsOneWidget);
+        await tapAndAdvance(tester, find.text('CONTINUE'));
+        expect(find.text('Face Position'), findsOneWidget);
 
-      for (int i = 0; i < 12; i++) {
-        await tester.pump(const Duration(milliseconds: 500));
-      }
+        for (int i = 0; i < 12; i++) {
+          await tester.pump(const Duration(milliseconds: 500));
+        }
 
-      expect(find.text('Welcome to'), findsOneWidget);
-    });
+        expect(find.text('Welcome to'), findsOneWidget);
+      },
+    );
 
     testWidgets(
       'New user continues: Home First Time → Mode → Countdown → Game',
@@ -1298,9 +1303,9 @@ void main() {
   // DOMAIN — GameSessionRecord
   // ================================================================
   group('Domain — GameSessionRecord', () {
-    test('create() yields a fresh ready session with id 0', () {
+    test('create() yields a fresh ready session with stable id', () {
       final r = GameSessionRecord.create();
-      expect(r.id, 0);
+      expect(r.id, greaterThan(0));
       expect(r.score, 0);
       expect(r.livesLost, 0);
       expect(r.maxLives, 3);
@@ -1309,7 +1314,7 @@ void main() {
       expect(r.endedAt, isNull);
     });
 
-    test('complete() returns a gameOver copy with round data', () {
+    test('complete() returns a completed copy with round data', () {
       final started = GameSessionRecord.create();
       final done = started.complete(
         finalScore: 500,
@@ -1329,7 +1334,7 @@ void main() {
       expect(done.catches, 12);
       expect(done.accuracy, 0.85);
       expect(done.smileScore, 72);
-      expect(done.state, GameSessionState.gameOver);
+      expect(done.state, GameSessionState.results);
       expect(done.endedAt, isNotNull);
       expect(done.startedAt, started.startedAt);
     });

@@ -794,8 +794,9 @@ class _BiometricTrackingArea extends StatelessWidget {
             right: 0,
             child: AnimatedBuilder(
               animation: pulse,
-              builder: (context, child) =>
-                  Opacity(opacity: 0.7 + 0.3 * pulse.value, child: child),
+              builder:
+                  (context, child) =>
+                      Opacity(opacity: 0.7 + 0.3 * pulse.value, child: child),
               child: Text(
                 detectionState.hasMultipleFaces
                     ? 'Multiple Faces Detected'
@@ -803,9 +804,10 @@ class _BiometricTrackingArea extends StatelessWidget {
                     ? '✓ Face Detected'
                     : 'Position Your Face',
                 textAlign: TextAlign.center,
-                style: detectionState.isFaceDetected
-                    ? AppTypography.faceDetected
-                    : AppTypography.cardLabel,
+                style:
+                    detectionState.isFaceDetected
+                        ? AppTypography.faceDetected
+                        : AppTypography.cardLabel,
               ),
             ),
           ),
@@ -880,12 +882,13 @@ class _BiometricTrackingArea extends StatelessWidget {
                     child: ClipOval(
                       child: AnimatedBuilder(
                         animation: scanner,
-                        builder: (context, _) => CustomPaint(
-                          painter: _LaserSweepPainter(
-                            progress: scanner.value,
-                            laserColor: AppColors.scanLaser,
-                          ),
-                        ),
+                        builder:
+                            (context, _) => CustomPaint(
+                              painter: _LaserSweepPainter(
+                                progress: scanner.value,
+                                laserColor: AppColors.scanLaser,
+                              ),
+                            ),
                       ),
                     ),
                   ),
@@ -947,20 +950,22 @@ class _BottomSheet extends StatelessWidget {
           // rebuilds when its state flips.
           ValueListenableBuilder<bool>(
             valueListenable: faceReady,
-            builder: (_, ready, _) =>
-                _StatusCard(label: 'Face Position', isReady: ready),
+            builder:
+                (_, ready, _) =>
+                    _StatusCard(label: 'Face Position', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: lightingReady,
-            builder: (_, ready, _) =>
-                _StatusCard(label: 'Lighting', isReady: ready),
+            builder:
+                (_, ready, _) => _StatusCard(label: 'Lighting', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: biometricReady,
-            builder: (_, ready, _) =>
-                _StatusCard(label: 'Biometric Features', isReady: ready),
+            builder:
+                (_, ready, _) =>
+                    _StatusCard(label: 'Biometric Features', isReady: ready),
           ),
           const SizedBox(height: 16),
 
@@ -1010,9 +1015,10 @@ class _StatusCard extends StatelessWidget {
         color: AppColors.cardBg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isReady
-              ? AppColors.readyGreen.withValues(alpha: 0.3)
-              : Colors.transparent,
+          color:
+              isReady
+                  ? AppColors.readyGreen.withValues(alpha: 0.3)
+                  : Colors.transparent,
           width: 1,
         ),
       ),
@@ -1037,9 +1043,10 @@ class _StatusCard extends StatelessWidget {
             child: Text(
               isReady ? 'Ready' : 'Analyzing…',
               key: ValueKey<bool>(isReady),
-              style: isReady
-                  ? AppTypography.statusReady
-                  : AppTypography.statusChecking,
+              style:
+                  isReady
+                      ? AppTypography.statusReady
+                      : AppTypography.statusChecking,
             ),
           ),
         ],
@@ -1140,12 +1147,13 @@ class _ScanningReticlePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..isAntiAlias = true
-      ..color = color.withValues(alpha: 0.45)
-      ..strokeWidth = 1.8
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+    final paint =
+        Paint()
+          ..isAntiAlias = true
+          ..color = color.withValues(alpha: 0.45)
+          ..strokeWidth = 1.8
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke;
 
     const corner = 14.0;
     const pad = -8.0;

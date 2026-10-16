@@ -3,9 +3,9 @@ import 'dart:ui' show Offset;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:muskaan_minigame/core/domain/mouth_tracking_result.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_state_machine.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
@@ -14,9 +14,7 @@ import 'package:muskaan_minigame/features/tracking/data/vision_sevice_impl.dart'
 /// Provider for VisionService abstraction.
 final visionServiceProvider = Provider<VisionService>((ref) {
   final service = VisionServiceImpl();
-  ref.onDispose(() {
-    service.dispose();
-  });
+  ref.onDispose(() => unawaited(service.dispose()));
   return service;
 });
 
@@ -82,7 +80,9 @@ class MouthTrackingState {
     bool? isStreaming,
     CameraStatus? cameraStatus,
     dynamic cameraController,
+    bool clearController = false,
     String? error,
+    bool clearError = false,
     double? fps,
     double? rawOpenness,
     DateTime? lastEventTime,
@@ -93,8 +93,9 @@ class MouthTrackingState {
     isCalibrated: isCalibrated ?? this.isCalibrated,
     isStreaming: isStreaming ?? this.isStreaming,
     cameraStatus: cameraStatus ?? this.cameraStatus,
-    cameraController: cameraController ?? this.cameraController,
-    error: error ?? this.error,
+    cameraController:
+        clearController ? null : cameraController ?? this.cameraController,
+    error: clearError ? null : error ?? this.error,
     fps: fps ?? this.fps,
     rawOpenness: rawOpenness ?? this.rawOpenness,
     lastEventTime: lastEventTime ?? this.lastEventTime,
@@ -106,10 +107,21 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
   final CameraService _camera;
   final VisionService _vision;
   final MouthStateMachine _stateMachine;
-  final Ref _ref;
   StreamSubscription<CameraState>? _cameraSub;
   DateTime? _lastFrameTime;
   double _calculatedFps = 0.0;
+  int _generation = 0;
+  Future<void> _operations = Future<void>.value();
+  CalibrationConfig _config;
+
+  Future<void> _enqueue(Future<void> Function() action) {
+    final operation = _operations.then((_) => action());
+    _operations = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
 
   CameraService get camera => _camera;
 
@@ -120,7 +132,7 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
     required Ref ref,
   }) : _camera = camera,
        _vision = vision,
-       _ref = ref,
+       _config = config,
        _stateMachine = MouthStateMachine(config: config),
        super(MouthTrackingState.initial(config)) {
     _cameraSub = _camera.stateStream.listen((camState) {
@@ -128,120 +140,135 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
         state = state.copyWith(
           cameraStatus: camState.status,
           cameraController: _camera.controller,
+          clearController: _camera.controller == null,
           error: camState.errorMessage,
+          clearError: camState.errorMessage == null,
         );
       }
     });
   }
 
-  /// Initialize camera and start tracking stream.
-  Future<void> startTracking({int maxFps = 15}) async {
-    try {
-      await _camera.initialize();
-      if (mounted) {
+  /// Camera operations are serialized across route changes and interruptions.
+  Future<void> startTracking({int maxFps = 15}) {
+    final generation = _generation;
+    return _enqueue(() async {
+      if (!mounted || generation != _generation) return;
+      if (state.isStreaming &&
+          _camera.isStreaming &&
+          !state.hasCameraError &&
+          state.error == null) {
+        return;
+      }
+      try {
+        if (state.hasCameraError || state.error != null) {
+          await _camera.dispose();
+        }
+        if (!mounted || generation != _generation) return;
+        state = state.copyWith(clearError: true);
+        await _camera.initialize();
+        if (!mounted || generation != _generation) return;
         state = state.copyWith(
           cameraStatus: _camera.state.status,
           cameraController: _camera.controller,
+          clearController: _camera.controller == null,
+          error: _camera.state.errorMessage,
+          clearError: _camera.state.errorMessage == null,
         );
-      }
-      if (_camera.state.isFailed ||
-          _camera.state.hasPermissionError ||
-          _camera.state.status == CameraStatus.noFrontCamera) {
-        state = state.copyWith(error: _camera.state.errorMessage);
-        return;
-      }
-
-      final config = _ref.read(calibrationConfigProvider);
-      _stateMachine.updateConfig(config);
-
-      await _camera.startStream(
-        maxFps: maxFps,
-        onFrame: (cameraImage) async {
-          final now = DateTime.now();
-          if (_lastFrameTime != null) {
-            final dtMs = now.difference(_lastFrameTime!).inMilliseconds;
-            if (dtMs > 0) {
-              final instantFps = 1000.0 / dtMs;
-              _calculatedFps = _calculatedFps == 0
-                  ? instantFps
-                  : (_calculatedFps * 0.8 + instantFps * 0.2);
-            }
-          }
-          _lastFrameTime = now;
-
-          final frame = await _vision.process(
-            cameraImage,
-            rotationDegrees: _camera.sensorOrientation,
-          );
-
-          final transition = frame.faceDetected && frame.rawOpenness != null
-              ? _stateMachine.update(frame.rawOpenness!)
-              : MouthTransition.idle;
-
-          DateTime? newEventTime = state.lastEventTime;
-          if (transition.justOpened || transition.justClosed) {
-            newEventTime = now;
-          }
-
-          // Normalized openness between 0.0 and 1.0 based on calibration
-          final double normalizedOpenness;
-          if (frame.rawOpenness != null && config.deadband > 0) {
-            normalizedOpenness =
-                ((frame.rawOpenness! - config.closedBaseline) / config.deadband)
-                    .clamp(0.0, 1.0);
-          } else {
-            normalizedOpenness = transition.isOpen ? 1.0 : 0.0;
-          }
-
-          final result = MouthTrackingResult(
-            normalizedPosition: frame.mouthCenter ?? const Offset(0.5, 0.5),
-            openness: normalizedOpenness,
-            confidence: frame.confidence,
-            faceDetected: frame.faceDetected,
-            isFresh: true,
-            capturedAt: frame.capturedAt,
-          );
-
-          if (mounted) {
-            state = state.copyWith(
-              latestResult: result,
-              latestTransition: transition,
-              isFaceDetected: frame.faceDetected,
-              isStreaming: true,
-              fps: _calculatedFps,
-              rawOpenness: frame.rawOpenness ?? 0.0,
-              lastEventTime: newEventTime,
+        if (!_camera.state.isReadyOrStreaming) return;
+        _stateMachine.updateConfig(_config);
+        await _camera.startStream(
+          maxFps: maxFps,
+          onFrame: (image) async {
+            final capturedAt = DateTime.now();
+            final frame = await _vision.process(
+              image,
+              rotationDegrees: _camera.imageRotationDegrees,
             );
-          }
-        },
-      );
-
-      state = state.copyWith(isStreaming: true);
-    } catch (e) {
-      if (mounted) {
-        state = state.copyWith(error: e.toString());
+            if (!mounted || generation != _generation) return;
+            final fresh =
+                DateTime.now().difference(capturedAt) <
+                MouthTrackingResult.staleAfter;
+            final usable =
+                fresh &&
+                frame.faceDetected &&
+                frame.confidence >= _config.faceConfidenceFloor &&
+                frame.rawOpenness != null &&
+                frame.rawOpenness!.isFinite;
+            MouthTransition transition;
+            if (usable) {
+              transition = _stateMachine.update(frame.rawOpenness!);
+            } else {
+              _stateMachine.reset();
+              transition = MouthTransition.idle;
+            }
+            if (_lastFrameTime != null) {
+              final dt = capturedAt.difference(_lastFrameTime!).inMicroseconds;
+              if (dt > 0) _calculatedFps = 1000000 / dt;
+            }
+            _lastFrameTime = capturedAt;
+            final openness =
+                usable && _config.deadband > 0
+                    ? ((frame.rawOpenness! - _config.closedBaseline) /
+                            _config.deadband)
+                        .clamp(0.0, 1.0)
+                    : 0.0;
+            state = state.copyWith(
+              latestResult: MouthTrackingResult(
+                normalizedPosition: frame.mouthCenter ?? const Offset(0.5, 0.5),
+                openness: openness,
+                confidence: usable ? frame.confidence : 0,
+                faceDetected: usable,
+                isFresh: fresh,
+                capturedAt: capturedAt,
+              ),
+              latestTransition: transition,
+              isFaceDetected: usable,
+              isStreaming: true,
+              rawOpenness: usable ? frame.rawOpenness! : 0,
+              fps: _calculatedFps,
+              lastEventTime:
+                  transition.justOpened || transition.justClosed
+                      ? capturedAt
+                      : state.lastEventTime,
+            );
+          },
+        );
+        if (mounted && generation == _generation) {
+          state = state.copyWith(isStreaming: _camera.isStreaming);
+        }
+      } catch (error) {
+        if (mounted && generation == _generation) {
+          state = state.copyWith(error: error.toString(), isStreaming: false);
+        }
       }
-    }
+    });
   }
 
-  /// Stop streaming camera frames.
-  Future<void> stopTracking() async {
-    await _camera.stopStream();
-    if (mounted) {
-      state = state.copyWith(isStreaming: false);
-    }
+  /// Invalidate pending frames immediately, then release the device camera.
+  Future<void> stopTracking() {
+    ++_generation;
+    // Cancel an in-flight initialization now rather than after it finishes.
+    final release = _camera.dispose();
+    return _enqueue(() async {
+      await release;
+      if (mounted) state = MouthTrackingState.initial(_config);
+      _stateMachine.reset();
+      _lastFrameTime = null;
+    });
   }
 
-  /// Update calibration configuration.
-  void updateCalibration(CalibrationConfig newConfig) {
-    _stateMachine.updateConfig(newConfig);
-    state = state.copyWith(isCalibrated: newConfig.calibrated);
+  void updateCalibration(CalibrationConfig config) {
+    if (!config.isValid) throw ArgumentError('Invalid mouth calibration');
+    _config = config;
+    _stateMachine.updateConfig(config);
+    state = state.copyWith(isCalibrated: config.calibrated);
   }
 
   @override
   void dispose() {
-    _cameraSub?.cancel();
-    _camera.stopStream();
+    ++_generation;
+    unawaited(_cameraSub?.cancel());
+    unawaited(_camera.dispose());
     super.dispose();
   }
 }
@@ -251,7 +278,7 @@ final mouthTrackingProvider =
     StateNotifierProvider<MouthTrackingController, MouthTrackingState>((ref) {
       final camera = ref.watch(cameraServiceProvider);
       final vision = ref.watch(visionServiceProvider);
-      final config = ref.watch(calibrationConfigProvider);
+      final config = ref.read(calibrationConfigProvider);
 
       return MouthTrackingController(
         camera: camera,

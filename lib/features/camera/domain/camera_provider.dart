@@ -7,6 +7,6 @@ import 'camera_service.dart';
 
 final cameraServiceProvider = Provider<CameraService>((ref) {
   final service = CameraServiceImpl();
-  ref.onDispose(() => unawaited(service.dispose()));
+  ref.onDispose(() => unawaited(service.close()));
   return service;
 });

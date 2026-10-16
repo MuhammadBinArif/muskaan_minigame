@@ -14,6 +14,7 @@ enum FoodItemType { gold, tea, teal }
 /// Game session record for persistence.
 class GameSessionRecord {
   final int id;
+  static int _lastSessionId = 0;
   final int score;
   final int livesLost;
   final int maxLives;
@@ -45,10 +46,14 @@ class GameSessionRecord {
 
   /// Create a brand-new, unpersisted session record.
   ///
-  /// `id = 0` signals "let the database assign an auto-increment id".
+  /// Allocate a stable SQLite-safe key once, before gameplay begins.
   factory GameSessionRecord.create() {
+    final now = DateTime.now();
+    final candidate = now.microsecondsSinceEpoch;
+    _lastSessionId =
+        candidate > _lastSessionId ? candidate : _lastSessionId + 1;
     return GameSessionRecord(
-      id: 0,
+      id: _lastSessionId,
       score: 0,
       livesLost: 0,
       maxLives: 3,
@@ -57,7 +62,7 @@ class GameSessionRecord {
       catches: 0,
       accuracy: 0.0,
       smileScore: 0,
-      startedAt: DateTime.now(),
+      startedAt: now,
       endedAt: null,
       state: GameSessionState.ready,
       isNewBest: false,
@@ -86,7 +91,7 @@ class GameSessionRecord {
       smileScore: finalSmileScore,
       startedAt: startedAt,
       endedAt: DateTime.now(),
-      state: GameSessionState.gameOver,
+      state: GameSessionState.results,
       isNewBest: false, // determined by persistence layer
     );
   }
@@ -120,17 +125,16 @@ class FoodItem {
     final newY = positionY + velocityY * dt;
 
     var newVX = velocityX;
-    var newVY = velocityY;
 
     if (newX <= 0 || newX >= screenWidth - size) newVX = -velocityX;
-    if (newY <= 0 || newY >= screenHeight - size) newVY = -velocityY;
+    // Food falls through the top and bottom; only side walls reflect it.
 
     return FoodItem(
       type: type,
       positionX: newX,
       positionY: newY,
       velocityX: newVX,
-      velocityY: newVY,
+      velocityY: velocityY,
       size: size,
       creationTime: creationTime,
     );

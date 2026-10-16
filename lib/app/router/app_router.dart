@@ -182,7 +182,47 @@ class _ResultsRouteBridge extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(gameSessionProvider);
-    return ResultsScreen(gameRecord: session.getGameResults());
+    return Stack(
+      children: [
+        ResultsScreen(gameRecord: session.getGameResults()),
+        if (session.isSaving || session.saveError != null)
+          Positioned(
+            left: 16,
+            right: 16,
+            top: 0,
+            child: SafeArea(
+              child: Material(
+                color: const Color(0xFF252542),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          session.isSaving
+                              ? 'Saving your result…'
+                              : 'Your result could not be saved.',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      if (session.saveError != null)
+                        TextButton(
+                          onPressed:
+                              () =>
+                                  ref
+                                      .read(gameSessionProvider.notifier)
+                                      .persistCompletedSession(),
+                          child: const Text('Retry save'),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 

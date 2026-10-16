@@ -63,6 +63,26 @@ void main() {
       expect(saved.isNewBest, isTrue);
     });
 
+    test(
+      'actual completed round is visible and repeated save is idempotent',
+      () async {
+        final record = GameSessionRecord.create().complete(
+          finalScore: 600,
+          finalLivesLost: 1,
+          timePlayed: 30,
+          finalBestCombo: 3,
+          finalCatches: 6,
+          finalAccuracy: .8,
+          finalSmileScore: 90,
+        );
+        await repo.saveSession(record);
+        await repo.saveSession(record);
+        expect(await repo.getAllSessions(), hasLength(1));
+        expect((await repo.getBestSession())!.id, record.id);
+        expect((await repo.watchAllSessions().first).single.id, record.id);
+      },
+    );
+
     test('getBestSession returns the session with highest score', () async {
       final record1 = GameSessionRecord(
         id: 0,

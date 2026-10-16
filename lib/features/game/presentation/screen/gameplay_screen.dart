@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -150,6 +151,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final AnimationController _pulse;
   late final AnimationController _float;
   late final AppLifecycleListener _lifecycle;
+  GameSessionNotifier? _sessionController;
 
   @override
   void initState() {
@@ -170,10 +172,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       duration: const Duration(milliseconds: 2200),
     )..repeat();
 
+    _sessionController = ref.read(gameSessionProvider.notifier);
     _lifecycle = AppLifecycleListener(
-      onPause: () => _trackingController?.stopTracking(),
-      onInactive: () => _trackingController?.stopTracking(),
-      onHide: () => _trackingController?.stopTracking(),
+      onPause: _pause,
+      onInactive: _pause,
+      onHide: _pause,
       onResume: () {
         final session = ref.read(gameSessionProvider);
         if (session.state == GameSessionState.playing) {
@@ -199,7 +202,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     _fall.dispose();
     _pulse.dispose();
     _float.dispose();
-    _trackingController?.stopTracking();
+    unawaited(_trackingController?.stopTracking());
+    _sessionController?.leaveGame();
     super.dispose();
   }
 
@@ -208,14 +212,31 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     ref.read(mouthTrackingProvider.notifier).stopTracking();
   }
 
-  void _resume() {
-    ref.read(gameSessionProvider.notifier).resumeGame();
-    ref.read(mouthTrackingProvider.notifier).startTracking();
+  Future<void> _resume() async {
+    await ref.read(mouthTrackingProvider.notifier).startTracking();
+    if (!mounted) return;
+    final tracking = ref.read(mouthTrackingProvider);
+    if (tracking.isStreaming && !tracking.hasCameraError) {
+      ref.read(gameSessionProvider.notifier).resumeGame();
+    }
   }
 
-  void _startGame() {
-    ref.read(gameSessionProvider.notifier).startGame();
-    ref.read(mouthTrackingProvider.notifier).startTracking();
+  Future<void> _startGame() async {
+    final session = ref.read(gameSessionProvider);
+    if (session.isSaving || session.saveError != null) {
+      context.go('/results');
+      return;
+    }
+    if (!ref.read(calibrationConfigProvider).calibrated) {
+      context.go('/calibration');
+      return;
+    }
+    await ref.read(mouthTrackingProvider.notifier).startTracking();
+    if (!mounted) return;
+    final tracking = ref.read(mouthTrackingProvider);
+    if (tracking.isStreaming && !tracking.hasCameraError) {
+      ref.read(gameSessionProvider.notifier).startGame();
+    }
   }
 
   @override
@@ -223,18 +244,32 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     final session = ref.watch(gameSessionProvider);
     final trackingState = ref.watch(mouthTrackingProvider);
 
-    // Listen to real mouth opening state to trigger food collisions continuously
-    ref.listen<MouthTrackingState>(mouthTrackingProvider, (prev, next) {
-      if (session.state != GameSessionState.playing) return;
-      if (next.latestResult.isActionable && next.latestTransition.isOpen) {
-        // Mouth ring is centered at screen (0.5, 0.52)
-        ref.read(gameSessionProvider.notifier).updateMouthTracking(
-          isOpen: true,
-          isActionable: true,
-          mouthX: 0.5,
-          mouthY: 0.52,
-        );
+    ref.listen<GameSessionStateData>(gameSessionProvider, (previous, next) {
+      if (previous?.state != GameSessionState.gameOver &&
+          next.state == GameSessionState.gameOver) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) context.go('/game-over');
+        });
       }
+    });
+    ref.listen<MouthTrackingState>(mouthTrackingProvider, (prev, next) {
+      if (next.hasCameraError || next.error != null) {
+        ref.read(gameSessionProvider.notifier).pauseGame();
+        return;
+      }
+      if (session.state != GameSessionState.playing ||
+          prev?.latestResult == next.latestResult) {
+        return;
+      }
+      final mouth = next.latestResult;
+      ref
+          .read(gameSessionProvider.notifier)
+          .updateMouthTracking(
+            isOpen: next.latestTransition.isOpen,
+            isActionable: mouth.isActionable,
+            mouthX: mouth.normalizedPosition.dx,
+            mouthY: mouth.normalizedPosition.dy,
+          );
     });
 
     return Scaffold(
@@ -244,11 +279,46 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
 
-          if (session.state == GameSessionState.playing) {
-            return _buildActiveGame(w, h, session, trackingState);
-          }
-
-          return _buildDemoView(w, h, session, trackingState);
+          final gameView =
+              session.state == GameSessionState.playing ||
+                      session.state == GameSessionState.paused
+                  ? _buildActiveGame(w, h, session, trackingState)
+                  : _buildDemoView(w, h, session, trackingState);
+          return Stack(
+            children: [
+              Positioned.fill(child: gameView),
+              if (trackingState.hasCameraError || trackingState.error != null)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  top: MediaQuery.paddingOf(context).top + 64,
+                  child: Material(
+                    color: const Color(0xFF252542),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
+                          Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              trackingState.error ?? 'Camera unavailable',
+                              style: const TextStyle(color: Colors.white),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed:
+                                () => _trackingController?.startTracking(),
+                            child: const Text('Retry camera'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
         },
       ),
     );
@@ -271,7 +341,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           Positioned.fill(
             child: _Vignette(phase: GameplayPhase.hazardHit, pulse: _pulse),
           ),
-        if (session.state == GameSessionState.ready)
+        if (session.state == GameSessionState.ready ||
+            session.state == GameSessionState.gameOver)
           Positioned.fill(
             child: Center(
               child: _StartOverlay(
@@ -376,13 +447,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           ),
         Positioned.fill(
           child: RepaintBoundary(
-            child: session.activeFoods.isNotEmpty
-                ? _ActiveFoodLayer(
-                    foods: session.activeFoods,
-                    width: w,
-                    height: h,
-                  )
-                : _FallingLayer(controller: _fall, width: w, height: h),
+            child: _ActiveFoodLayer(
+              foods: session.activeFoods,
+              width: w,
+              height: h,
+            ),
           ),
         ),
         Positioned.fill(
@@ -399,6 +468,27 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             ),
           ),
         ),
+        if (trackingState.latestResult.isActionable)
+          Positioned(
+            left: trackingState.latestResult.normalizedPosition.dx * w - 14,
+            top: trackingState.latestResult.normalizedPosition.dy * h - 14,
+            child: IgnorePointer(
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color:
+                        trackingState.latestTransition.isOpen
+                            ? _C.mouthGreen
+                            : _C.comboA,
+                    width: 3,
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (session.recentCollisions.isNotEmpty)
           _buildCollisionBanner(session.recentCollisions.first),
         if (session.recentCollisions.isNotEmpty &&
@@ -1300,10 +1390,7 @@ class _DebugOverlay extends StatelessWidget {
   final MouthTrackingState trackingState;
   final CalibrationConfig config;
 
-  const _DebugOverlay({
-    required this.trackingState,
-    required this.config,
-  });
+  const _DebugOverlay({required this.trackingState, required this.config});
 
   @override
   Widget build(BuildContext context) {
@@ -1338,13 +1425,36 @@ class _DebugOverlay extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            _diagRow('Face Present', '${res.faceDetected ? "YES" : "NO"} (${(res.confidence * 100).toInt()}%)',
-                res.faceDetected ? Colors.greenAccent : Colors.redAccent),
-            _diagRow('Raw Openness', trackingState.rawOpenness.toStringAsFixed(4), Colors.white),
-            _diagRow('Smoothed', transition.smoothedOpenness.toStringAsFixed(4), Colors.white),
-            _diagRow('Thresholds', 'C: ${config.closedBaseline.toStringAsFixed(3)} | O: ${config.openThreshold.toStringAsFixed(3)}', Colors.white70),
-            _diagRow('Mouth State', isOpen ? "OPEN" : "CLOSED", isOpen ? const Color(0xFF3DD68C) : Colors.orangeAccent),
-            _diagRow('Detector FPS', '${trackingState.fps.toStringAsFixed(1)} FPS', Colors.cyanAccent),
+            _diagRow(
+              'Face Present',
+              '${res.faceDetected ? "YES" : "NO"} (${(res.confidence * 100).toInt()}%)',
+              res.faceDetected ? Colors.greenAccent : Colors.redAccent,
+            ),
+            _diagRow(
+              'Raw Openness',
+              trackingState.rawOpenness.toStringAsFixed(4),
+              Colors.white,
+            ),
+            _diagRow(
+              'Smoothed',
+              transition.smoothedOpenness.toStringAsFixed(4),
+              Colors.white,
+            ),
+            _diagRow(
+              'Thresholds',
+              'C: ${config.closedBaseline.toStringAsFixed(3)} | O: ${config.openThreshold.toStringAsFixed(3)}',
+              Colors.white70,
+            ),
+            _diagRow(
+              'Mouth State',
+              isOpen ? "OPEN" : "CLOSED",
+              isOpen ? const Color(0xFF3DD68C) : Colors.orangeAccent,
+            ),
+            _diagRow(
+              'Detector FPS',
+              '${trackingState.fps.toStringAsFixed(1)} FPS',
+              Colors.cyanAccent,
+            ),
             if (trackingState.lastEventTime != null)
               _diagRow(
                 'Last Event',
@@ -1365,11 +1475,20 @@ class _DebugOverlay extends StatelessWidget {
         children: [
           Text(
             '$label: ',
-            style: const TextStyle(fontSize: 10, color: Colors.white70, fontFamily: 'monospace'),
+            style: const TextStyle(
+              fontSize: 10,
+              color: Colors.white70,
+              fontFamily: 'monospace',
+            ),
           ),
           Text(
             value,
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color, fontFamily: 'monospace'),
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: color,
+              fontFamily: 'monospace',
+            ),
           ),
         ],
       ),

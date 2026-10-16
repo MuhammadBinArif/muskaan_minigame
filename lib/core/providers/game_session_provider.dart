@@ -4,6 +4,7 @@
 // and the [GameSessionNotifier] that mutates it.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,6 +28,9 @@ class GameSessionStateData {
   final bool isGameOver;
   final bool isReady;
   final bool isPlaying;
+  final GameSessionRecord? completedRecord;
+  final bool isSaving;
+  final String? saveError;
 
   const GameSessionStateData({
     required this.state,
@@ -37,6 +41,9 @@ class GameSessionStateData {
     required this.isGameOver,
     required this.isReady,
     required this.isPlaying,
+    this.completedRecord,
+    this.isSaving = false,
+    this.saveError,
   });
 
   /// Create initial state data
@@ -78,21 +85,7 @@ class GameSessionStateData {
       return null;
     }
 
-    return GameSessionRecord(
-      id: 0, // persistence layer assigns the real id
-      score: stats.score,
-      livesLost: 3 - stats.lives,
-      maxLives: 3,
-      timePlayed: 45 - stats.timeRemaining,
-      bestCombo: stats.maxCombo,
-      catches: stats.catches,
-      accuracy: stats.accuracy,
-      smileScore: stats.smileScore,
-      startedAt: DateTime.now(),
-      endedAt: DateTime.now(),
-      state: GameSessionState.results,
-      isNewBest: false, // determined when the record is persisted
-    );
+    return completedRecord;
   }
 }
 
@@ -100,18 +93,28 @@ class GameSessionStateData {
 class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   final GameRecordsRepository? repository;
 
-  GameSessionNotifier({this.repository}) : super(GameSessionStateData.initial()) {
-    _initializeGame();
-  }
+  GameSessionNotifier({
+    this.repository,
+    this.sessionDuration = const Duration(seconds: 45),
+    Stopwatch? clock,
+  }) : _clock = clock ?? Stopwatch(),
+       super(GameSessionStateData.initial());
 
   Timer? _foodSpawnTimer;
   Timer? _gameTickTimer;
-  final Stopwatch _gameStopwatch = Stopwatch();
+  Stopwatch get _gameStopwatch => _clock;
   bool _isInitialized = false;
   bool _hasPersisted = false;
+  Future<void>? _saveInFlight;
+  GameSessionRecord? _session;
+  int _lastTickMs = 0;
+  bool _biteConsumed = false;
+  final Duration sessionDuration;
+  final Stopwatch _clock;
+  final math.Random _random = math.Random();
 
   // Game configuration
-  static const int _gameDurationSeconds = 45;
+  int get _gameDurationSeconds => sessionDuration.inSeconds;
   static const int _maxLives = 3;
   static const double _spawnIntervalMs = 1500;
   static const int _foodLifetimeMs = 5000;
@@ -137,7 +140,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     if (state.state != GameSessionState.playing) return;
 
     // Determine food type based on weights
-    final random = DateTime.now().millisecondsSinceEpoch;
+    final random = _random.nextInt(100000);
     final type = _getRandomFoodType();
 
     // Spawn at random x position
@@ -148,7 +151,9 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
     // Random velocity
     final vx = (random % 200 - 100) / 1000.0; // -0.1 to 0.1
-    final vy = 0.005 + (random % 100) / 10000.0; // 0.005 to 0.015
+    // Normalized screen units per second: reach the mouth before expiry.
+    final progress = 1 - state.stats.timeRemaining / _gameDurationSeconds;
+    final vy = 0.20 + progress * 0.12 + (random % 100) / 1000.0;
 
     final food = FoodItem(
       type: type,
@@ -165,7 +170,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   }
 
   FoodItemType _getRandomFoodType() {
-    final random = DateTime.now().microsecondsSinceEpoch;
+    final random = _random.nextInt(100);
     final roll = random % 100;
 
     if (roll < 40) {
@@ -190,26 +195,30 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
     // Update food positions and remove expired foods
     final currentTime = _gameStopwatch.elapsedMilliseconds;
+    final dt = (currentTime - _lastTickMs) / 1000.0;
+    _lastTickMs = currentTime;
     final activeFoods = <FoodItem>[];
     var stats = state.stats;
 
     for (final food in state.activeFoods) {
       if (food.isActive(currentTime, _foodLifetimeMs)) {
         final updatedFood = food.update(
-          0.016,
+          dt,
           1.0,
           1.0,
         ); // 16ms at 60fps, normalized screen
 
         // If edible food falls past the mouth zone (y > 0.68) and wasn't caught,
         // treat it as a miss and reset combo
-        if (food.positionY <= 0.68 && updatedFood.positionY > 0.68) {
+        if (updatedFood.positionY >= 1.0 + updatedFood.size) {
           if (updatedFood.type != FoodItemType.tea) {
             stats = stats.applyMiss();
           }
         }
 
-        activeFoods.add(updatedFood);
+        if (updatedFood.positionY < 1.0 + updatedFood.size) {
+          activeFoods.add(updatedFood);
+        }
       }
     }
 
@@ -227,7 +236,10 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   void _endGame() {
     if (state.state == GameSessionState.gameOver) return;
 
+    _gameStopwatch.stop();
+    final record = getGameResults();
     state = state.copyWith(
+      completedRecord: record,
       state: GameSessionState.gameOver,
       isGameOver: true,
       isPlaying: false,
@@ -237,23 +249,51 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     _foodSpawnTimer?.cancel();
     _gameTickTimer?.cancel();
 
-    // Persist session exactly once
-    if (!_hasPersisted && repository != null) {
-      _hasPersisted = true;
-      final record = getGameResults();
-      repository!.saveSession(record).catchError((_) {
-        // Logging / error suppression to prevent crashing the game loop
-      });
+    unawaited(persistCompletedSession());
+  }
+
+  /// Retry the SAME immutable result. Stable IDs make retries idempotent.
+  Future<void> persistCompletedSession() {
+    if (_saveInFlight != null) return _saveInFlight!;
+    final record = state.completedRecord;
+    if (_hasPersisted || repository == null || record == null) {
+      return Future<void>.value();
+    }
+    state = state.copyWith(isSaving: true, clearSaveError: true);
+    final operation = _saveRecord(record);
+    _saveInFlight = operation;
+    return operation;
+  }
+
+  Future<void> _saveRecord(GameSessionRecord record) async {
+    try {
+      await repository!.saveSession(record);
+      if (mounted && state.completedRecord?.id == record.id) {
+        _hasPersisted = true;
+        state = state.copyWith(isSaving: false, clearSaveError: true);
+      }
+    } catch (error) {
+      if (mounted && state.completedRecord?.id == record.id) {
+        state = state.copyWith(isSaving: false, saveError: error.toString());
+      }
+    } finally {
+      _saveInFlight = null;
     }
   }
 
   /// Start a new game session
   void startGame() {
-    if (!state.canStartGame) return;
+    if (!state.canStartGame || state.isSaving || state.saveError != null) {
+      return;
+    }
 
     // Reset game
     _resetGame();
     _hasPersisted = false;
+    _session = GameSessionRecord.create();
+    _lastTickMs = 0;
+    _biteConsumed = false;
+    state = GameSessionStateData.initial();
 
     // Set to playing state
     _gameStopwatch.reset();
@@ -264,7 +304,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
       isPlaying: true,
       isGameOver: false,
       isReady: false,
-      stats: GameStats.initial(),
+      stats: GameStats.initial().updateTimeRemaining(_gameDurationSeconds),
     );
   }
 
@@ -285,18 +325,44 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   void pauseGame() {
     if (!state.canPause) return;
 
-    state = state.copyWith(state: GameSessionState.paused, isPaused: true);
+    _gameStopwatch.stop();
+    state = state.copyWith(
+      state: GameSessionState.paused,
+      isPaused: true,
+      isPlaying: false,
+    );
   }
 
   /// Resume the game
   void resumeGame() {
     if (!state.canResume) return;
 
-    state = state.copyWith(state: GameSessionState.playing, isPaused: false);
+    _gameStopwatch.start();
+    state = state.copyWith(
+      state: GameSessionState.playing,
+      isPaused: false,
+      isPlaying: true,
+    );
+  }
+
+  /// Stop work immediately; publish route-exit state after widget disposal.
+  void leaveGame() {
+    _foodSpawnTimer?.cancel();
+    _gameTickTimer?.cancel();
+    _gameStopwatch.stop();
+    final leaving = _session;
+    scheduleMicrotask(() {
+      if (mounted && identical(_session, leaving)) quitGame();
+    });
   }
 
   /// Quit current game session
   void quitGame() {
+    if (state.state == GameSessionState.ready) return;
+    if (state.state == GameSessionState.gameOver ||
+        state.state == GameSessionState.results) {
+      return;
+    }
     // End the game if currently playing
     if (state.state == GameSessionState.playing ||
         state.state == GameSessionState.paused) {
@@ -331,7 +397,12 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   }) {
     if (state.state != GameSessionState.playing) return;
 
-    if (!isOpen || !isActionable) return;
+    if (!isActionable) return;
+    if (!isOpen) {
+      _biteConsumed = false;
+      return;
+    }
+    if (_biteConsumed) return;
 
     // Mouth collision zone in normalized screen coordinates
     const collisionRadius = 0.14; // ~14% of screen dimensions
@@ -345,7 +416,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
       final dy = food.positionY - mouthY;
       final distance = (dx * dx + dy * dy);
 
-      if (distance <= collisionRadius * collisionRadius) {
+      if (!_biteConsumed && distance <= collisionRadius * collisionRadius) {
+        _biteConsumed = true;
         // Collision inside the open mouth zone!
         final isEdible = food.type != FoodItemType.tea;
         final collision = CollisionEvent(
@@ -401,10 +473,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     state = state.copyWith(
       stats: state.stats.applyCollision(collision),
       activeFoods: remainingFoods,
-      recentCollisions: [
-        collision,
-        ...state.recentCollisions.take(4),
-      ],
+      recentCollisions: [collision, ...state.recentCollisions.take(4)],
     );
 
     if (state.stats.isGameOver || state.stats.isTimeOut) {
@@ -414,7 +483,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
   /// Get final game results for persistence
   GameSessionRecord getGameResults() {
-    return GameSessionRecord.create().complete(
+    if (state.completedRecord != null) return state.completedRecord!;
+    return (_session ??= GameSessionRecord.create()).complete(
       finalScore: state.stats.score,
       finalLivesLost: _maxLives - state.stats.lives,
       timePlayed: _gameDurationSeconds - state.stats.timeRemaining,
@@ -445,6 +515,10 @@ extension GameSessionStateDataCopy on GameSessionStateData {
     bool? isGameOver,
     bool? isReady,
     bool? isPlaying,
+    GameSessionRecord? completedRecord,
+    bool? isSaving,
+    String? saveError,
+    bool clearSaveError = false,
   }) {
     return GameSessionStateData(
       state: state ?? this.state,
@@ -455,6 +529,9 @@ extension GameSessionStateDataCopy on GameSessionStateData {
       isGameOver: isGameOver ?? this.isGameOver,
       isReady: isReady ?? this.isReady,
       isPlaying: isPlaying ?? this.isPlaying,
+      completedRecord: completedRecord ?? this.completedRecord,
+      isSaving: isSaving ?? this.isSaving,
+      saveError: clearSaveError ? null : saveError ?? this.saveError,
     );
   }
 }
