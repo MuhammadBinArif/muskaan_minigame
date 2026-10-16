@@ -31,6 +31,7 @@ void main() {
     expect(session.result!.neutralFacePosition.dx, closeTo(.45, .0001));
     expect(session.result!.neutralFacePosition.dy, closeTo(.52, .0001));
     expect(session.result!.neutralFaceSize, closeTo(.3, .001));
+    expect(session.result!.horizontalControlRange, closeTo(.195, .001));
     expect(session.progress, 1);
     session.reset();
     expect(session.result, isNull);

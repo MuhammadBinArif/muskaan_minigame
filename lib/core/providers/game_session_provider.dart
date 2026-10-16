@@ -410,6 +410,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     final remainingFoods = <FoodItem>[];
     final recentCollisions = List<CollisionEvent>.from(state.recentCollisions);
     var stats = state.stats;
+    var collided = false;
 
     for (final food in state.activeFoods) {
       final dx = food.positionX - mouthX;
@@ -418,6 +419,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
       if (!_biteConsumed && distance <= collisionRadius * collisionRadius) {
         _biteConsumed = true;
+        collided = true;
         // Collision inside the open mouth zone!
         final isEdible = food.type != FoodItemType.tea;
         final collision = CollisionEvent(
@@ -433,6 +435,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
         remainingFoods.add(food);
       }
     }
+
+    if (!collided) return;
 
     state = state.copyWith(
       stats: stats,
