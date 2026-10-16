@@ -23,9 +23,6 @@ class MouthTrackingResult {
   /// Values between are linearly interpolated.
   final double openness;
 
-  /// Detector confidence in `[0, 1]`. Drop results below ~0.4.
-  final double confidence;
-
   /// True when at least one face was detected and the landmarks
   /// used to compute [openness] were present.
   final bool faceDetected;
@@ -40,7 +37,6 @@ class MouthTrackingResult {
   const MouthTrackingResult({
     required this.normalizedPosition,
     required this.openness,
-    required this.confidence,
     required this.faceDetected,
     required this.isFresh,
     required this.capturedAt,
@@ -50,7 +46,6 @@ class MouthTrackingResult {
   factory MouthTrackingResult.empty() => MouthTrackingResult(
     normalizedPosition: const Offset(0.5, 0.5),
     openness: 0.0,
-    confidence: 0.0,
     faceDetected: false,
     isFresh: false,
     capturedAt: DateTime.fromMillisecondsSinceEpoch(0),
@@ -65,7 +60,6 @@ class MouthTrackingResult {
   bool get isActionable =>
       faceDetected &&
       isFresh &&
-      confidence >= 0.4 &&
       DateTime.now().difference(capturedAt) < staleAfter;
 
   @override
@@ -73,7 +67,6 @@ class MouthTrackingResult {
       'MouthTrackingResult('
       'pos: ($normalizedPosition), '
       'open: ${openness.toStringAsFixed(2)}, '
-      'conf: ${confidence.toStringAsFixed(2)}, '
       'detected: $faceDetected, '
       'fresh: $isFresh)';
 }

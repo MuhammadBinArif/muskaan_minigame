@@ -8,19 +8,21 @@ import 'package:muskaan_minigame/features/calibration/presentation/screens/calib
 import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
-import 'package:muskaan_minigame/features/face_detection/domain/face_detection_result.dart';
-import 'package:muskaan_minigame/features/face_detection/domain/face_detection_service.dart';
+import 'package:muskaan_minigame/features/tracking/domain/face_tracking.dart';
+import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
+import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 
 class DiagnosticFakeCameraService implements CameraService {
   DiagnosticFakeCameraService({
     CameraState initialState = const CameraState.idle(),
     this.autoStream = true,
+    this.deliverFrame = false,
   }) : _state = initialState;
 
   final _states = StreamController<CameraState>.broadcast();
   CameraState _state;
   final bool autoStream;
+  final bool deliverFrame;
 
   @override
   CameraState get state => _state;
@@ -49,6 +51,7 @@ class DiagnosticFakeCameraService implements CameraService {
     int maxFps = 15,
   }) async {
     if (autoStream) emit(const CameraState(status: CameraStatus.streaming));
+    if (deliverFrame) await onFrame(DiagnosticCameraImage());
   }
 
   @override
@@ -64,22 +67,35 @@ class DiagnosticFakeCameraService implements CameraService {
       _state.status == CameraStatus.permissionPermanentlyDenied;
 }
 
-class DiagnosticFaceService implements FaceDetectionService {
+class DiagnosticVisionService implements VisionService {
   @override
-  Future<FaceDetectionResult> process(
+  Future<VisionFrame> process(
     CameraImage image, {
     required int rotationDegrees,
-  }) async => FaceDetectionResult.empty();
+  }) async => VisionFrame(
+    observation: FaceTrackingObservation(
+      faceDetected: true,
+      faceCount: 1,
+      facePosition: const Offset(.5, .45),
+      faceSize: .35,
+      mouthPosition: const Offset(.5, .58),
+      mouthOpenness: .02,
+      capturedAt: DateTime.now(),
+    ),
+  );
 
   @override
   Future<void> dispose() async {}
 }
+
+class DiagnosticCameraImage extends Fake implements CameraImage {}
 
 void main() {
   Future<void> pumpScreen(
     WidgetTester tester,
     CameraState cameraState, {
     bool autoStream = true,
+    bool deliverFrame = false,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -88,11 +104,10 @@ void main() {
             DiagnosticFakeCameraService(
               initialState: cameraState,
               autoStream: autoStream,
+              deliverFrame: deliverFrame,
             ),
           ),
-          faceDetectionServiceProvider.overrideWithValue(
-            DiagnosticFaceService(),
-          ),
+          visionServiceProvider.overrideWithValue(DiagnosticVisionService()),
         ],
         child: const MaterialApp(home: CalibrationScreen()),
       ),
@@ -165,5 +180,17 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('renders tracking-active state from a real observation path', (
+    tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      const CameraState(status: CameraStatus.ready),
+      deliverFrame: true,
+    );
+    expect(find.text('✓ Tracking Active'), findsOneWidget);
+    expect(find.text('Keep your mouth closed and hold still'), findsOneWidget);
   });
 }

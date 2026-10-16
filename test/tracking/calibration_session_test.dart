@@ -9,7 +9,12 @@ void main() {
     void feed(double value, int count) {
       for (var i = 0; i < count; i++) {
         t = t.add(const Duration(milliseconds: 70));
-        session.add(value, capturedAt: t);
+        session.add(
+          value,
+          capturedAt: t,
+          facePosition: const Offset(.45, .52),
+          faceSize: .3,
+        );
       }
     }
 
@@ -23,6 +28,9 @@ void main() {
     feed(.02, 8);
     expect(session.result!.calibrated, isTrue);
     expect(session.result!.isValid, isTrue);
+    expect(session.result!.neutralFacePosition.dx, closeTo(.45, .0001));
+    expect(session.result!.neutralFacePosition.dy, closeTo(.52, .0001));
+    expect(session.result!.neutralFaceSize, closeTo(.3, .001));
     expect(session.progress, 1);
     session.reset();
     expect(session.result, isNull);

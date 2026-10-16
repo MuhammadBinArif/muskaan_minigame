@@ -55,15 +55,22 @@ class MouthStateMachine {
   /// fire. Prevents sub-100 ms blips from producing catch events.
   Duration minimumOpenDuration;
 
+  /// A threshold must remain crossed for this long before changing state.
+  /// This prevents a single noisy frame from firing a transition.
+  Duration minimumEvidenceDuration;
+
   bool _isOpen = false;
   DateTime? _lastTransitionAt;
   double _smoothed = 0.0;
   bool _primed = false;
+  bool? _candidateOpen;
+  DateTime? _candidateSince;
 
   MouthStateMachine({
     required this.config,
     this.smoothingAlpha = 0.4,
     this.minimumOpenDuration = const Duration(milliseconds: 100),
+    this.minimumEvidenceDuration = const Duration(milliseconds: 70),
   });
 
   /// Feed a new raw openness value. Returns the transition state.
@@ -88,25 +95,42 @@ class MouthStateMachine {
     bool justOpened = false;
     bool justClosed = false;
 
-    if (_isOpen) {
-      // Currently open — close when below the closed baseline and minimum open duration has passed.
-      if (_smoothed <= config.closedBaseline) {
-        final openFor =
-            _lastTransitionAt == null
-                ? Duration.zero
-                : t.difference(_lastTransitionAt!);
-        if (openFor >= minimumOpenDuration) {
-          _isOpen = false;
-          _lastTransitionAt = t;
-          justClosed = true;
-        }
+    final wantsOpen = !_isOpen && _smoothed >= config.openThreshold;
+    final wantsClosed = _isOpen && _smoothed <= config.closedBaseline;
+    final target = wantsOpen ? true : (wantsClosed ? false : null);
+    if (target == null) {
+      _candidateOpen = null;
+      _candidateSince = null;
+    } else if (_candidateOpen != target) {
+      _candidateOpen = target;
+      _candidateSince = t;
+      final openFor =
+          _lastTransitionAt == null
+              ? Duration.zero
+              : t.difference(_lastTransitionAt!);
+      final canClose = target || openFor >= minimumOpenDuration;
+      if (minimumEvidenceDuration == Duration.zero && canClose) {
+        _isOpen = target;
+        _lastTransitionAt = t;
+        justOpened = target;
+        justClosed = !target;
+        _candidateOpen = null;
+        _candidateSince = null;
       }
     } else {
-      // Currently closed — open when above the open threshold.
-      if (_smoothed >= config.openThreshold) {
-        _isOpen = true;
+      final evidenceFor = t.difference(_candidateSince!);
+      final openFor =
+          _lastTransitionAt == null
+              ? Duration.zero
+              : t.difference(_lastTransitionAt!);
+      final canClose = target || openFor >= minimumOpenDuration;
+      if (evidenceFor >= minimumEvidenceDuration && canClose) {
+        _isOpen = target;
         _lastTransitionAt = t;
-        justOpened = true;
+        justOpened = target;
+        justClosed = !target;
+        _candidateOpen = null;
+        _candidateSince = null;
       }
     }
 
@@ -138,6 +162,8 @@ class MouthStateMachine {
     _lastTransitionAt = null;
     _smoothed = 0.0;
     _primed = false;
+    _candidateOpen = null;
+    _candidateSince = null;
   }
 
   /// Current state without feeding a new sample.

@@ -174,8 +174,8 @@ void main() {
       await tapAndAdvance(tester, find.text('CONTINUE'));
 
       expect(find.text('Face in Frame'), findsOneWidget);
-      expect(find.text('Single Face'), findsOneWidget);
-      expect(find.text('Detection Ready'), findsOneWidget);
+      expect(find.text('Neutral Baseline'), findsOneWidget);
+      expect(find.text('Mouth Range'), findsOneWidget);
       expect(
         find.text('Analyzing…'),
         findsWidgets,
@@ -211,7 +211,7 @@ void main() {
       expect(find.text('Camera Access'), findsOneWidget);
     });
 
-    testWidgets('Calibration auto-navigates to Home First Time', (
+    testWidgets('Calibration waits for measured tracking samples', (
       tester,
     ) async {
       await pumpApp(tester, '/calibration');
@@ -225,10 +225,11 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      expect(find.text('Welcome to'), findsOneWidget);
+      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Welcome to'), findsNothing);
     });
 
-    testWidgets('Full camera flow reaches Home First Time', (tester) async {
+    testWidgets('Camera flow waits for tracking calibration', (tester) async {
       await pumpApp(tester, '/camera-permission');
 
       await tapAndAdvance(tester, find.text('CONTINUE'));
@@ -238,7 +239,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
       }
 
-      expect(find.text('Welcome to'), findsOneWidget);
+      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Welcome to'), findsNothing);
     });
   });
 
@@ -545,7 +547,7 @@ void main() {
   // END-TO-END FLOWS (verify the ordered 01 → 13 pipeline)
   // ================================================================
   group('End-to-end flows', () {
-    testWidgets('New user completes face detection before continuing', (
+    testWidgets('New user reaches measured tracking calibration', (
       tester,
     ) async {
       await pumpApp(tester, '/how-to-play/step1');
@@ -566,7 +568,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
       }
 
-      expect(find.text('Welcome to'), findsOneWidget);
+      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Welcome to'), findsNothing);
     });
 
     testWidgets(

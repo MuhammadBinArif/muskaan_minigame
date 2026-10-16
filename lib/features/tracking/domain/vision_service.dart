@@ -8,43 +8,31 @@ import 'dart:ui' show Offset;
 
 import 'package:camera/camera.dart' show CameraImage;
 
+import 'face_tracking.dart';
+
 /// One output frame from the vision service.
 ///
 /// `rawOpenness` is the normalised openness BEFORE calibration
 /// thresholds are applied — the state machine consumes it.
 class VisionFrame {
-  /// Raw (uncalibrated) openness in normalised units.
-  /// `null` when no face or unusable face pose.
-  final double? rawOpenness;
+  final FaceTrackingObservation observation;
 
-  /// Mouth centre in normalised [0,1] camera coordinates.
-  /// `null` when no face.
-  final Offset? mouthCenter;
+  const VisionFrame({required this.observation});
 
-  /// Face detection confidence in [0,1]. `0.0` when no face.
-  final double confidence;
-
-  /// True if a usable face was detected in this frame.
-  final bool faceDetected;
-
-  /// On-device capture/processing timestamp.
-  final DateTime capturedAt;
-
-  const VisionFrame({
-    required this.rawOpenness,
-    required this.mouthCenter,
-    required this.confidence,
-    required this.faceDetected,
-    required this.capturedAt,
-  });
-
-  factory VisionFrame.noFace({DateTime? now}) => VisionFrame(
-    rawOpenness: null,
-    mouthCenter: null,
-    confidence: 0.0,
-    faceDetected: false,
-    capturedAt: now ?? DateTime.now(),
+  factory VisionFrame.noFace({DateTime? now, int faceCount = 0}) => VisionFrame(
+    observation: FaceTrackingObservation.missing(
+      capturedAt: now ?? DateTime.now(),
+      faceCount: faceCount,
+    ),
   );
+
+  double? get rawOpenness => observation.mouthOpenness;
+  Offset? get mouthCenter => observation.mouthPosition;
+  Offset? get faceCenter => observation.facePosition;
+  double? get faceSize => observation.faceSize;
+  bool get faceDetected => observation.faceDetected;
+  int get faceCount => observation.faceCount;
+  DateTime get capturedAt => observation.capturedAt;
 }
 
 /// ML-Kit-agnostic face/mouth detection boundary.

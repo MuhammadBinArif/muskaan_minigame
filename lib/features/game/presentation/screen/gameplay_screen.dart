@@ -1423,7 +1423,7 @@ class _DebugOverlay extends StatelessWidget {
             const SizedBox(height: 4),
             _diagRow(
               'Face Present',
-              '${res.faceDetected ? "YES" : "NO"} (${(res.confidence * 100).toInt()}%)',
+              res.faceDetected ? 'YES' : 'NO',
               res.faceDetected ? Colors.greenAccent : Colors.redAccent,
             ),
             _diagRow(
