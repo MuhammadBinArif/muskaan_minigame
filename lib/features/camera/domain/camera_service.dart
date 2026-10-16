@@ -10,7 +10,7 @@ import 'package:camera/camera.dart' show CameraImage;
 import 'camera_state.dart';
 
 /// Callback invoked for each camera frame the pipeline decides to keep.
-/// The future completes when processing finishes, providing backpressure.
+/// Called on a background isolate where the platform supports it.
 typedef FrameCallback = FutureOr<void> Function(CameraImage image);
 
 abstract class CameraService {
@@ -26,6 +26,9 @@ abstract class CameraService {
 
   /// Sensor orientation in degrees of the active camera.
   int get sensorOrientation;
+
+  /// Rotation needed to present the current camera buffer upright to ML Kit.
+  int get imageRotationDegrees;
 
   /// Whether the service is currently streaming frames.
   bool get isStreaming;

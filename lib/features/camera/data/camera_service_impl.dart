@@ -109,6 +109,8 @@ class CameraServiceImpl implements CameraService {
   @override
   int get sensorOrientation => _session?.rotationDegrees ?? 0;
   @override
+  int get imageRotationDegrees => _session?.rotationDegrees ?? 0;
+  @override
   bool get isStreaming => _session?.streaming ?? false;
 
   void _emit(CameraState state) {

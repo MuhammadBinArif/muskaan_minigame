@@ -3,31 +3,18 @@ import 'dart:ui' show Offset;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:muskaan_minigame/core/domain/mouth_tracking_result.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/camera/data/camera_service_impl.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_state_machine.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'package:muskaan_minigame/features/tracking/data/vision_sevice_impl.dart';
 
-/// Provider for CameraService abstraction.
-final cameraServiceProvider = Provider<CameraService>((ref) {
-  final service = CameraServiceImpl();
-  ref.onDispose(() {
-    unawaited(service.close());
-  });
-  return service;
-});
-
 /// Provider for VisionService abstraction.
 final visionServiceProvider = Provider<VisionService>((ref) {
   final service = VisionServiceImpl();
-  final camera = ref.watch(cameraServiceProvider);
-  ref.onDispose(() async {
-    await camera.dispose();
-    await service.dispose();
-  });
+  ref.onDispose(() => unawaited(service.dispose()));
   return service;
 });
 
@@ -195,7 +182,7 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
             final capturedAt = DateTime.now();
             final frame = await _vision.process(
               image,
-              rotationDegrees: _camera.sensorOrientation,
+              rotationDegrees: _camera.imageRotationDegrees,
             );
             if (!mounted || generation != _generation) return;
             final fresh =

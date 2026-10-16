@@ -5,14 +5,35 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:camera/camera.dart';
 import 'package:muskaan_minigame/app/router/app_router.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_result.dart';
+import 'package:muskaan_minigame/features/face_detection/domain/face_detection_service.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/game/presentation/screen/game_over_screen.dart';
 import 'package:muskaan_minigame/features/home/presentation/screens/home_screen.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'camera/camera_sevice_imple_test.dart';
+
+class NavigationFaceService implements FaceDetectionService {
+  @override
+  Future<FaceDetectionResult> process(
+    CameraImage image, {
+    required int rotationDegrees,
+  }) async {
+    return FaceDetectionResult(
+      faces: const [DetectedFace(boundingBox: Rect.fromLTWH(10, 10, 100, 100))],
+      processedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
 
 void main() {
   /// Pumps the app on a portrait mobile viewport.
@@ -37,6 +58,9 @@ void main() {
           ),
           bestRecordStreamProvider.overrideWith((ref) => Stream.value(null)),
           cameraServiceProvider.overrideWith((ref) => FakeCameraService()),
+          faceDetectionServiceProvider.overrideWith(
+            (ref) => NavigationFaceService(),
+          ),
           visionServiceProvider.overrideWith((ref) => NullVisionService()),
         ],
         child: MaterialApp.router(routerConfig: router),
@@ -149,8 +173,8 @@ void main() {
       await tapAndAdvance(tester, find.text('CONTINUE'));
 
       expect(find.text('Face Position'), findsOneWidget);
-      expect(find.text('Closed-mouth baseline'), findsOneWidget);
-      expect(find.text('Open and close verified'), findsOneWidget);
+      expect(find.text('Lighting'), findsOneWidget);
+      expect(find.text('Biometric Features'), findsOneWidget);
       expect(
         find.text('Analyzing…'),
         findsWidgets,
@@ -186,7 +210,7 @@ void main() {
       expect(find.text('Camera Access'), findsOneWidget);
     });
 
-    testWidgets('Calibration does not auto-complete without face samples', (
+    testWidgets('Calibration auto-navigates to Home First Time', (
       tester,
     ) async {
       await pumpApp(tester, '/calibration');
@@ -200,13 +224,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      expect(find.text('Face Position'), findsOneWidget);
-      expect(find.text('Welcome to'), findsNothing);
+      expect(find.text('Welcome to'), findsOneWidget);
     });
 
-    testWidgets('Camera flow stops at calibration until measurements arrive', (
-      tester,
-    ) async {
+    testWidgets('Full camera flow reaches Home First Time', (tester) async {
       await pumpApp(tester, '/camera-permission');
 
       await tapAndAdvance(tester, find.text('CONTINUE'));
@@ -216,8 +237,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
       }
 
-      expect(find.text('Face Position'), findsOneWidget);
-      expect(find.text('Welcome to'), findsNothing);
+      expect(find.text('Welcome to'), findsOneWidget);
     });
   });
 
@@ -525,7 +545,7 @@ void main() {
   // ================================================================
   group('End-to-end flows', () {
     testWidgets(
-      'New user must complete measured calibration before continuing',
+      'New user completes face detection before continuing',
       (tester) async {
         await pumpApp(tester, '/how-to-play/step1');
 
@@ -545,8 +565,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 500));
         }
 
-        expect(find.text('Face Position'), findsOneWidget);
-        expect(find.text('Welcome to'), findsNothing);
+        expect(find.text('Welcome to'), findsOneWidget);
       },
     );
 

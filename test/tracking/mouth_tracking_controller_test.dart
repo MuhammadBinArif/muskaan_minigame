@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
@@ -30,6 +31,9 @@ class MockCameraService implements CameraService {
 
   @override
   int get sensorOrientation => 0;
+
+  @override
+  int get imageRotationDegrees => 0;
 
   @override
   bool get isStreaming => _streaming;

@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 
 // ==========================================
 // THEME TOKENS
