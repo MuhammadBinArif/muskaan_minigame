@@ -8,6 +8,7 @@ import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
+import 'package:muskaan_minigame/features/tracking/domain/face_tracking.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_state_machine.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
@@ -73,7 +74,7 @@ class MockCameraService implements CameraService {
   Future<void> dispose() async {
     isDisposed = true;
     _streaming = false;
-    await _stateCtrl.close();
+    if (!_stateCtrl.isClosed) await _stateCtrl.close();
   }
 
   @override
@@ -82,6 +83,7 @@ class MockCameraService implements CameraService {
 
 class MockVisionService implements VisionService {
   VisionFrame nextFrame = VisionFrame.noFace();
+  Completer<VisionFrame>? pendingFrame;
   bool isDisposed = false;
 
   @override
@@ -89,6 +91,7 @@ class MockVisionService implements VisionService {
     CameraImage image, {
     required int rotationDegrees,
   }) async {
+    if (pendingFrame case final pending?) return pending.future;
     return nextFrame;
   }
 
@@ -109,13 +112,13 @@ void main() {
       config = const CalibrationConfig(
         closedBaseline: 0.05,
         openThreshold: 0.15,
-        faceConfidenceFloor: 0.5,
         calibrated: true,
       );
       machine = MouthStateMachine(
         config: config,
         smoothingAlpha: 1.0, // Snap directly for deterministic unit tests
         minimumOpenDuration: const Duration(milliseconds: 100),
+        minimumEvidenceDuration: Duration.zero,
       );
     });
 
@@ -171,6 +174,22 @@ void main() {
       machine.reset();
       expect(machine.isOpen, isFalse);
     });
+
+    test('one noisy frame cannot open the mouth state', () {
+      final guarded = MouthStateMachine(
+        config: config,
+        smoothingAlpha: 1,
+        minimumEvidenceDuration: const Duration(milliseconds: 70),
+      );
+      final now = DateTime(2026);
+      expect(guarded.update(.2, now: now).isOpen, isFalse);
+      expect(
+        guarded
+            .update(.02, now: now.add(const Duration(milliseconds: 70)))
+            .isOpen,
+        isFalse,
+      );
+    });
   });
 
   group('MouthTrackingController integration tests', () {
@@ -189,7 +208,6 @@ void main() {
             (ref) => const CalibrationConfig(
               closedBaseline: 0.05,
               openThreshold: 0.15,
-              faceConfidenceFloor: 0.5,
               calibrated: true,
             ),
           ),
@@ -228,21 +246,38 @@ void main() {
       expect(container.read(mouthTrackingProvider).isStreaming, isTrue);
 
       // Deliver frame with face detected and open mouth
+      final capturedAt = DateTime.now();
       mockVision.nextFrame = VisionFrame(
-        rawOpenness: 0.20,
-        mouthCenter: const Offset(0.5, 0.6),
-        confidence: 0.98,
-        faceDetected: true,
-        capturedAt: DateTime.now(),
+        observation: FaceTrackingObservation(
+          faceDetected: true,
+          faceCount: 1,
+          facePosition: const Offset(0.5, 0.5),
+          faceSize: 0.4,
+          mouthPosition: const Offset(0.5, 0.6),
+          mouthOpenness: 0.20,
+          capturedAt: capturedAt,
+        ),
       );
 
+      mockCamera.callback?.call(FakeCameraImage());
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      mockVision.nextFrame = VisionFrame(
+        observation: FaceTrackingObservation(
+          faceDetected: true,
+          faceCount: 1,
+          facePosition: const Offset(0.5, 0.5),
+          faceSize: 0.4,
+          mouthPosition: const Offset(0.5, 0.6),
+          mouthOpenness: 0.20,
+          capturedAt: capturedAt.add(const Duration(milliseconds: 80)),
+        ),
+      );
       mockCamera.callback?.call(FakeCameraImage());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       final updatedState = container.read(mouthTrackingProvider);
       expect(updatedState.isFaceDetected, isTrue);
       expect(updatedState.latestResult.faceDetected, isTrue);
-      expect(updatedState.latestResult.confidence, 0.98);
       expect(
         updatedState.latestResult.normalizedPosition,
         const Offset(0.5, 0.6),
@@ -263,13 +298,46 @@ void main() {
         const CalibrationConfig(
           closedBaseline: 0.04,
           openThreshold: 0.12,
-          faceConfidenceFloor: 0.5,
           calibrated: false,
         ),
       );
 
       expect(container.read(mouthTrackingProvider).isCalibrated, isFalse);
     });
+
+    test(
+      'an in-flight frame cannot update state after tracking stops',
+      () async {
+        final controller = container.read(mouthTrackingProvider.notifier);
+        await controller.startTracking();
+        final pending = Completer<VisionFrame>();
+        mockVision.pendingFrame = pending;
+
+        mockCamera.callback?.call(FakeCameraImage());
+        await Future<void>.delayed(Duration.zero);
+        await controller.stopTracking();
+
+        pending.complete(
+          VisionFrame(
+            observation: FaceTrackingObservation(
+              faceDetected: true,
+              faceCount: 1,
+              facePosition: const Offset(0.5, 0.5),
+              faceSize: 0.4,
+              mouthPosition: const Offset(0.5, 0.6),
+              mouthOpenness: 0.20,
+              capturedAt: DateTime.now(),
+            ),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        final stopped = container.read(mouthTrackingProvider);
+        expect(stopped.isStreaming, isFalse);
+        expect(stopped.tracking.status, FaceTrackingStatus.searching);
+        expect(stopped.latestResult.faceDetected, isFalse);
+      },
+    );
   });
 
   group('GameSessionNotifier continuous mouth tracking integration', () {

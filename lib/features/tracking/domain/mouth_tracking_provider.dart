@@ -7,6 +7,8 @@ import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
+import 'package:muskaan_minigame/features/tracking/domain/face_tracking.dart';
+import 'package:muskaan_minigame/features/tracking/domain/face_tracking_processor.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_state_machine.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'package:muskaan_minigame/features/tracking/data/vision_sevice_impl.dart';
@@ -27,6 +29,7 @@ final calibrationConfigProvider = StateProvider<CalibrationConfig>(
 class MouthTrackingState {
   final MouthTrackingResult latestResult;
   final MouthTransition latestTransition;
+  final StableFaceTracking tracking;
   final bool isFaceDetected;
   final bool isCalibrated;
   final bool isStreaming;
@@ -40,6 +43,7 @@ class MouthTrackingState {
   const MouthTrackingState({
     required this.latestResult,
     required this.latestTransition,
+    required this.tracking,
     required this.isFaceDetected,
     required this.isCalibrated,
     required this.isStreaming,
@@ -65,6 +69,7 @@ class MouthTrackingState {
       MouthTrackingState(
         latestResult: MouthTrackingResult.empty(),
         latestTransition: MouthTransition.idle,
+        tracking: StableFaceTracking.searching(),
         isFaceDetected: false,
         isCalibrated: config.calibrated,
         isStreaming: false,
@@ -75,6 +80,7 @@ class MouthTrackingState {
   MouthTrackingState copyWith({
     MouthTrackingResult? latestResult,
     MouthTransition? latestTransition,
+    StableFaceTracking? tracking,
     bool? isFaceDetected,
     bool? isCalibrated,
     bool? isStreaming,
@@ -89,6 +95,7 @@ class MouthTrackingState {
   }) => MouthTrackingState(
     latestResult: latestResult ?? this.latestResult,
     latestTransition: latestTransition ?? this.latestTransition,
+    tracking: tracking ?? this.tracking,
     isFaceDetected: isFaceDetected ?? this.isFaceDetected,
     isCalibrated: isCalibrated ?? this.isCalibrated,
     isStreaming: isStreaming ?? this.isStreaming,
@@ -107,6 +114,7 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
   final CameraService _camera;
   final VisionService _vision;
   final MouthStateMachine _stateMachine;
+  final FaceTrackingProcessor _trackingProcessor;
   StreamSubscription<CameraState>? _cameraSub;
   DateTime? _lastFrameTime;
   double _calculatedFps = 0.0;
@@ -130,10 +138,12 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
     required VisionService vision,
     required CalibrationConfig config,
     required Ref ref,
+    FaceTrackingProcessor? trackingProcessor,
   }) : _camera = camera,
        _vision = vision,
        _config = config,
        _stateMachine = MouthStateMachine(config: config),
+       _trackingProcessor = trackingProcessor ?? FaceTrackingProcessor(),
        super(MouthTrackingState.initial(config)) {
     _cameraSub = _camera.stateStream.listen((camState) {
       if (mounted) {
@@ -185,46 +195,66 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
               rotationDegrees: _camera.imageRotationDegrees,
             );
             if (!mounted || generation != _generation) return;
+            final processedAt = DateTime.now();
+            final tracking = _trackingProcessor.update(
+              frame.observation,
+              now: processedAt,
+            );
             final fresh =
-                DateTime.now().difference(capturedAt) <
+                processedAt.difference(frame.capturedAt) <
                 MouthTrackingResult.staleAfter;
             final usable =
                 fresh &&
-                frame.faceDetected &&
-                frame.confidence >= _config.faceConfidenceFloor &&
-                frame.rawOpenness != null &&
-                frame.rawOpenness!.isFinite;
+                tracking.isTracking &&
+                tracking.mouthOpenness != null &&
+                tracking.mouthOpenness!.isFinite;
             MouthTransition transition;
             if (usable) {
-              transition = _stateMachine.update(frame.rawOpenness!);
-            } else {
+              transition = _stateMachine.update(
+                tracking.mouthOpenness!,
+                now: frame.capturedAt,
+              );
+            } else if (tracking.status == FaceTrackingStatus.lost) {
               _stateMachine.reset();
               transition = MouthTransition.idle;
+            } else {
+              transition = MouthTransition(
+                isOpen: state.latestTransition.isOpen,
+                justOpened: false,
+                justClosed: false,
+                currentStateDuration:
+                    state.latestTransition.currentStateDuration,
+                smoothedOpenness: state.latestTransition.smoothedOpenness,
+              );
             }
             if (_lastFrameTime != null) {
               final dt = capturedAt.difference(_lastFrameTime!).inMicroseconds;
               if (dt > 0) _calculatedFps = 1000000 / dt;
             }
             _lastFrameTime = capturedAt;
-            final openness =
+            final normalizedOpenness =
                 usable && _config.deadband > 0
-                    ? ((frame.rawOpenness! - _config.closedBaseline) /
+                    ? ((tracking.mouthOpenness! - _config.closedBaseline) /
                             _config.deadband)
                         .clamp(0.0, 1.0)
                     : 0.0;
+            final position =
+                tracking.mouthPosition ??
+                tracking.position ??
+                const Offset(0.5, 0.5);
             state = state.copyWith(
               latestResult: MouthTrackingResult(
-                normalizedPosition: frame.mouthCenter ?? const Offset(0.5, 0.5),
-                openness: openness,
-                confidence: usable ? frame.confidence : 0,
-                faceDetected: usable,
-                isFresh: fresh,
-                capturedAt: capturedAt,
+                normalizedPosition: position,
+                openness: normalizedOpenness,
+                faceDetected: tracking.isTracking,
+                isFresh: fresh && tracking.isTracking,
+                capturedAt: frame.capturedAt,
               ),
               latestTransition: transition,
-              isFaceDetected: usable,
+              tracking: tracking,
+              isFaceDetected: tracking.isTracking,
               isStreaming: true,
-              rawOpenness: usable ? frame.rawOpenness! : 0,
+              rawOpenness: usable ? tracking.mouthOpenness! : 0,
               fps: _calculatedFps,
               lastEventTime:
                   transition.justOpened || transition.justClosed
@@ -253,6 +283,7 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
       await release;
       if (mounted) state = MouthTrackingState.initial(_config);
       _stateMachine.reset();
+      _trackingProcessor.reset();
       _lastFrameTime = null;
     });
   }

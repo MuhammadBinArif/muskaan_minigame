@@ -227,10 +227,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       context.go('/results');
       return;
     }
-    if (!ref.read(calibrationConfigProvider).calibrated) {
-      context.go('/calibration');
-      return;
-    }
     await ref.read(mouthTrackingProvider.notifier).startTracking();
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
@@ -1427,7 +1423,7 @@ class _DebugOverlay extends StatelessWidget {
             const SizedBox(height: 4),
             _diagRow(
               'Face Present',
-              '${res.faceDetected ? "YES" : "NO"} (${(res.confidence * 100).toInt()}%)',
+              res.faceDetected ? 'YES' : 'NO',
               res.faceDetected ? Colors.greenAccent : Colors.redAccent,
             ),
             _diagRow(

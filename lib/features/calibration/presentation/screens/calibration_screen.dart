@@ -10,14 +10,17 @@ import 'package:camera/camera.dart' show CameraController, CameraPreview;
 import 'package:permission_handler/permission_handler.dart'
     show openAppSettings;
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
-import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
+import 'package:muskaan_minigame/features/tracking/domain/calibration_session.dart';
+import 'package:muskaan_minigame/features/tracking/domain/face_tracking.dart';
+import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
+import 'package:muskaan_minigame/features/tracking/domain/tracking_coordinates.dart';
 
 // ==========================================
 // THEME TOKENS  (unchanged)
 // ==========================================
 class AppColors {
-  static const Color backgroundTop = Color(0xFF0D1A0D);
-  static const Color backgroundBottom = Color(0xFF0A100A);
+  static const Color backgroundTop = Color(0xFF17102B);
+  static const Color backgroundBottom = Color(0xFF080612);
   static const Color dashGreen = Color(0xFF3CB371);
   static const Color dashYellow = Color(0x99FFD700);
   static const Color sheetBg = Color(0xFF1A1A2E);
@@ -63,16 +66,13 @@ class AppTypography {
     height: 1.0,
   );
   static const TextStyle helper = TextStyle(
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: FontWeight.w400,
     color: AppColors.helperGrey,
   );
 }
 
 class _Timings {
-  static const Duration faceDetected = Duration(milliseconds: 600);
-  static const Duration lightingReady = Duration(milliseconds: 1300);
-  static const Duration startExtraction = Duration(milliseconds: 1500);
   static const Duration extractionDuration = Duration(milliseconds: 2600);
   static const Duration postCompletionHold = Duration(milliseconds: 400);
   static const Duration pulse = Duration(milliseconds: 1400);
@@ -107,11 +107,10 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
   // ── Sequence state ──
   bool _sequenceStarted = false;
+  final _calibration = CalibrationSession();
+  String _instruction = 'Center one face in the frame';
 
   // ── Timers ──
-  Timer? _stepFace;
-  Timer? _stepLighting;
-  Timer? _stepBiometric;
   Timer? _navTimer;
 
   // ── Lifecycle observer ──
@@ -127,7 +126,7 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
   static const double _innerW = 96;
   static const double _innerH = 64;
 
-  FaceDetectionController? _faceDetectionController;
+  MouthTrackingController? _trackingController;
 
   @override
   void initState() {
@@ -159,17 +158,11 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
       curve: Curves.easeInOutCubic,
     );
 
-    // If initial tracking state is already ready, start sequence
-    final initialDetectionState = ref.read(faceDetectionProvider);
-    if (initialDetectionState.isFaceDetected) {
-      _startCalibrationSequence();
-    }
-
     // Start real camera tracking
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _faceDetectionController = ref.read(faceDetectionProvider.notifier);
-        _faceDetectionController?.start();
+        _trackingController = ref.read(mouthTrackingProvider.notifier);
+        _trackingController?.startTracking(maxFps: 12);
       }
     });
   }
@@ -179,88 +172,75 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      _faceDetectionController?.stop();
+      _cancelCalibrationSequence();
+      unawaited(_trackingController?.stopTracking());
     } else if (state == AppLifecycleState.resumed) {
-      _faceDetectionController?.start();
+      _trackingController?.startTracking(maxFps: 12);
     }
 
     // If we deferred a navigation while backgrounded, run it now.
     if (_isForeground && _pendingNavigation) {
       _pendingNavigation = false;
-      _navigateAway();
+      unawaited(_navigateAway());
     }
   }
 
-  void _navigateAway() {
+  Future<void> _navigateAway() async {
+    if (!mounted || !context.mounted) return;
+    await _trackingController?.stopTracking();
     if (!mounted || !context.mounted) return;
     context.go('/home-first-time');
   }
 
   void _cancelCalibrationSequence() {
     _sequenceStarted = false;
-    _stepFace?.cancel();
-    _stepLighting?.cancel();
-    _stepBiometric?.cancel();
     _navTimer?.cancel();
-    _stepFace = null;
-    _stepLighting = null;
-    _stepBiometric = null;
     _navTimer = null;
-    _progressController.reset();
+    _calibration.reset();
+    _progressController.value = 0;
     _faceReady.value = false;
     _lightingReady.value = false;
     _biometricReady.value = false;
+    if (mounted) setState(() => _instruction = 'Center one face in the frame');
   }
 
-  void _startCalibrationSequence() {
-    if (_sequenceStarted) return;
+  void _sampleCalibration(MouthTrackingState tracking) {
+    if (_sequenceStarted || !_isForeground) return;
+    if (!tracking.tracking.isTracking ||
+        tracking.tracking.mouthOpenness == null) {
+      if (tracking.tracking.status == FaceTrackingStatus.lost) {
+        _cancelCalibrationSequence();
+      }
+      return;
+    }
+    _faceReady.value = true;
+    _calibration.add(
+      tracking.tracking.mouthOpenness!,
+      capturedAt: tracking.tracking.updatedAt,
+      facePosition: tracking.tracking.position,
+      faceSize: tracking.tracking.faceSize,
+    );
+    _lightingReady.value = _calibration.step != CalibrationStep.closed;
+    _progressController.value = _calibration.progress;
+    if (mounted) setState(() => _instruction = _calibration.instruction);
+    final config = _calibration.result;
+    if (config == null) return;
     _sequenceStarted = true;
-
-    _stepFace = Timer(_Timings.faceDetected, () {
+    _biometricReady.value = true;
+    ref.read(calibrationConfigProvider.notifier).state = config;
+    _trackingController?.updateCalibration(config);
+    _navTimer = Timer(_Timings.postCompletionHold, () {
       if (!mounted) return;
-      _faceReady.value = true;
-    });
-
-    _stepLighting = Timer(_Timings.lightingReady, () {
-      if (!mounted) return;
-      _lightingReady.value = true;
-    });
-
-    _stepBiometric = Timer(_Timings.startExtraction, () {
-      if (!mounted) return;
-
-      _progressController.forward().whenCompleteOrCancel(() {
-        if (!mounted) return;
-        _biometricReady.value = true;
-
-        // Freeze continuous loops — the screen is done.
-        _pulseController.stop();
-        _scannerController.stop();
-
-        _navTimer = Timer(_Timings.postCompletionHold, () {
-          if (!mounted) return;
-
-          // 🟢 FIX: Direct navigation. No `addPostFrameCallback` —
-          // that API does not schedule a frame, so it silently hangs
-          // when every animation on the screen has been stopped.
-          // `context.go` schedules its own frame, guaranteeing the
-          // router transition is rendered on the next tick.
-          if (_isForeground) {
-            _navigateAway();
-          } else {
-            // Timer fired while backgrounded — defer until resumed.
-            _pendingNavigation = true;
-          }
-        });
-      });
+      if (_isForeground) {
+        unawaited(_navigateAway());
+      } else {
+        _pendingNavigation = true;
+      }
     });
   }
 
   @override
   void dispose() {
-    _stepFace?.cancel();
-    _stepLighting?.cancel();
-    _stepBiometric?.cancel();
     _navTimer?.cancel();
 
     _progressController.dispose();
@@ -275,7 +255,7 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
 
     // Stop the camera stream when leaving calibration. The provider performs
     // detector teardown once the screen no longer watches it.
-    _faceDetectionController?.stop();
+    _trackingController?.stopTracking();
 
     super.dispose();
   }
@@ -283,16 +263,13 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-    final detectionState = ref.watch(faceDetectionProvider);
+    final trackingState = ref.watch(mouthTrackingProvider);
 
-    // Listen to camera status changes to drive calibration sequence
-    ref.listen<FaceDetectionState>(faceDetectionProvider, (previous, next) {
-      if (next.hasCameraError || next.status == FaceDetectionStatus.error) {
+    ref.listen<MouthTrackingState>(mouthTrackingProvider, (previous, next) {
+      if (next.hasCameraError || next.error != null) {
         _cancelCalibrationSequence();
-      } else if (next.isFaceDetected && !_sequenceStarted) {
-        _startCalibrationSequence();
-      } else if (!next.isFaceDetected && _sequenceStarted) {
-        _cancelCalibrationSequence();
+      } else if (previous?.tracking.updatedAt != next.tracking.updatedAt) {
+        _sampleCalibration(next);
       }
     });
 
@@ -368,8 +345,28 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
                     outerH: _outerH,
                     innerW: _innerW,
                     innerH: _innerH,
-                    detectionState: detectionState,
-                    onRetry: () => _faceDetectionController?.retry(),
+                    trackingState: trackingState,
+                    onRetry: () {
+                      _cancelCalibrationSequence();
+                      _trackingController?.startTracking(maxFps: 12);
+                    },
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 28,
+              right: 28,
+              top: MediaQuery.paddingOf(context).top + 62,
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  _instruction,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppColors.cardLabel,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
@@ -409,7 +406,7 @@ class _BiometricTrackingArea extends StatelessWidget {
   final double outerH;
   final double innerW;
   final double innerH;
-  final FaceDetectionState detectionState;
+  final MouthTrackingState trackingState;
   final VoidCallback onRetry;
 
   const _BiometricTrackingArea({
@@ -419,17 +416,36 @@ class _BiometricTrackingArea extends StatelessWidget {
     required this.outerH,
     required this.innerW,
     required this.innerH,
-    required this.detectionState,
+    required this.trackingState,
     required this.onRetry,
   });
 
-  Widget _buildCameraFeedOrDiagnostic() {
-    final status = detectionState.cameraStatus;
-    final controller = detectionState.cameraController;
+  Offset? _trackingPoint() {
+    final position = trackingState.tracking.position;
+    final controller = trackingState.cameraController;
+    if (position == null ||
+        controller is! CameraController ||
+        controller.value.previewSize == null) {
+      return null;
+    }
+    final preview = controller.value.previewSize!;
+    final sourceWidth = preview.height;
+    final sourceHeight = preview.width;
+    return TrackingCoordinates.mapToCover(
+      position: position,
+      sourceWidth: sourceWidth,
+      sourceHeight: sourceHeight,
+      viewportWidth: outerW,
+      viewportHeight: outerH,
+    );
+  }
 
-    if (detectionState.status == FaceDetectionStatus.error &&
-        !detectionState.hasCameraError) {
-      final errorMsg = detectionState.error ?? 'Face detection failed.';
+  Widget _buildCameraFeedOrDiagnostic() {
+    final status = trackingState.cameraStatus;
+    final controller = trackingState.cameraController;
+
+    if (trackingState.error != null && !trackingState.hasCameraError) {
+      final errorMsg = trackingState.error ?? 'Face tracking failed.';
       return Semantics(
         label: 'Face Detection Error: $errorMsg',
         container: true,
@@ -468,7 +484,7 @@ class _BiometricTrackingArea extends StatelessWidget {
       );
     }
 
-    if (detectionState.isCameraReady &&
+    if (trackingState.isCameraReady &&
         controller is CameraController &&
         controller.value.isInitialized) {
       return Semantics(
@@ -671,7 +687,7 @@ class _BiometricTrackingArea extends StatelessWidget {
     }
 
     if (status == CameraStatus.failed) {
-      final errorMsg = detectionState.error ?? 'Failed to initialize camera.';
+      final errorMsg = trackingState.error ?? 'Failed to initialize camera.';
       return Semantics(
         label: 'Camera Error: $errorMsg',
         container: true,
@@ -779,6 +795,7 @@ class _BiometricTrackingArea extends StatelessWidget {
     const labelHeight = 20.0;
     const labelGap = 12.0;
     const margin = 40.0;
+    final trackingPoint = _trackingPoint();
 
     return SizedBox(
       width: outerW + margin,
@@ -798,14 +815,17 @@ class _BiometricTrackingArea extends StatelessWidget {
                   (context, child) =>
                       Opacity(opacity: 0.7 + 0.3 * pulse.value, child: child),
               child: Text(
-                detectionState.hasMultipleFaces
+                trackingState.tracking.faceCount > 1
                     ? 'Multiple Faces Detected'
-                    : detectionState.isFaceDetected
-                    ? '✓ Face Detected'
+                    : trackingState.tracking.status ==
+                        FaceTrackingStatus.temporarilyLost
+                    ? 'Face Temporarily Lost'
+                    : trackingState.tracking.isTracking
+                    ? '✓ Tracking Active'
                     : 'Position Your Face',
                 textAlign: TextAlign.center,
                 style:
-                    detectionState.isFaceDetected
+                    trackingState.tracking.isTracking
                         ? AppTypography.faceDetected
                         : AppTypography.cardLabel,
               ),
@@ -830,6 +850,30 @@ class _BiometricTrackingArea extends StatelessWidget {
                       child: _buildCameraFeedOrDiagnostic(),
                     ),
                   ),
+
+                  if (trackingPoint != null &&
+                      trackingState.tracking.isTracking)
+                    Positioned(
+                      left: trackingPoint.dx.clamp(6, outerW - 6) - 6,
+                      top: trackingPoint.dy.clamp(6, outerH - 6) - 6,
+                      child: IgnorePointer(
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppColors.extractionCyan,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: AppColors.extractionCyan,
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
 
                   // Outer oval — scale + glow pulse
                   AnimatedBuilder(
@@ -952,20 +996,21 @@ class _BottomSheet extends StatelessWidget {
             valueListenable: faceReady,
             builder:
                 (_, ready, _) =>
-                    _StatusCard(label: 'Face Position', isReady: ready),
+                    _StatusCard(label: 'Face in Frame', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: lightingReady,
             builder:
-                (_, ready, _) => _StatusCard(label: 'Lighting', isReady: ready),
+                (_, ready, _) =>
+                    _StatusCard(label: 'Neutral Baseline', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: biometricReady,
             builder:
                 (_, ready, _) =>
-                    _StatusCard(label: 'Biometric Features', isReady: ready),
+                    _StatusCard(label: 'Mouth Range', isReady: ready),
           ),
           const SizedBox(height: 16),
 
@@ -985,8 +1030,8 @@ class _BottomSheet extends StatelessWidget {
               final pct = (progress.value * 100).toInt();
               return Text(
                 progress.value >= 1.0
-                    ? 'Extraction complete!'
-                    : 'Extracting landmarks ($pct%)...',
+                    ? 'Tracking calibration ready!'
+                    : 'Calibrating tracking ($pct%)...',
                 style: AppTypography.helper,
                 textAlign: TextAlign.center,
               );

@@ -10,11 +10,10 @@ void main() {
       expect(r.isFresh, isFalse);
     });
 
-    test('a fresh, confident, detected result is actionable', () {
+    test('a fresh detected result is actionable', () {
       final r = MouthTrackingResult(
         normalizedPosition: const Offset(0.5, 0.5),
         openness: 0.8,
-        confidence: 0.9,
         faceDetected: true,
         isFresh: true,
         capturedAt: DateTime.now(),
@@ -22,23 +21,10 @@ void main() {
       expect(r.isActionable, isTrue);
     });
 
-    test('low confidence is not actionable', () {
-      final r = MouthTrackingResult(
-        normalizedPosition: const Offset(0.5, 0.5),
-        openness: 0.8,
-        confidence: 0.3,
-        faceDetected: true,
-        isFresh: true,
-        capturedAt: DateTime.now(),
-      );
-      expect(r.isActionable, isFalse);
-    });
-
     test('stale timestamp is not actionable even if flagged fresh', () {
       final r = MouthTrackingResult(
         normalizedPosition: const Offset(0.5, 0.5),
         openness: 0.8,
-        confidence: 0.9,
         faceDetected: true,
         isFresh: true,
         capturedAt: DateTime.now().subtract(MouthTrackingResult.staleAfter * 2),
@@ -50,7 +36,6 @@ void main() {
       final r = MouthTrackingResult(
         normalizedPosition: const Offset(0.5, 0.5),
         openness: 0.8,
-        confidence: 0.9,
         faceDetected: false,
         isFresh: true,
         capturedAt: DateTime.now(),

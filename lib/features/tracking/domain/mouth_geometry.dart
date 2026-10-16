@@ -112,6 +112,40 @@ class MouthGeometry {
     return normalize(raw: raw, faceHeightPx: faceHeightPx);
   }
 
+  /// Estimates the visible mouth aperture from ML Kit's lip contours.
+  ///
+  /// `upperLipBottom` and `lowerLipTop` are documented contour signals, not
+  /// smile probabilities. The central third is used because lip corners
+  /// normally meet even while the mouth is open. The pixel gap is normalized
+  /// by face height to reduce sensitivity to camera distance.
+  static double? contourOpenness({
+    required List<double> upperLipBottomY,
+    required List<double> lowerLipTopY,
+    required double faceHeightPx,
+  }) {
+    if (faceHeightPx < 20 ||
+        upperLipBottomY.length < 3 ||
+        lowerLipTopY.length < 3) {
+      return null;
+    }
+    final count = math.min(upperLipBottomY.length, lowerLipTopY.length);
+    final start = count ~/ 3;
+    final end = count - start;
+    if (start >= end) return null;
+    final gaps = <double>[];
+    for (var i = start; i < end; i++) {
+      final upper = upperLipBottomY[i];
+      final lower = lowerLipTopY[i];
+      if (!upper.isFinite || !lower.isFinite) return null;
+      gaps.add(math.max(0, lower - upper));
+    }
+    gaps.sort();
+    final median = gaps[gaps.length ~/ 2];
+    final normalized = median / faceHeightPx;
+    if (!normalized.isFinite || normalized > 0.5) return null;
+    return normalized;
+  }
+
   /// Reject faces with extreme tilt — past ~30° the landmark Y values
   /// are dominated by head rotation, not mouth motion.
   static bool isHeadPoseUsable({
