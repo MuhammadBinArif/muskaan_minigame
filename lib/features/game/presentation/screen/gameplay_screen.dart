@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -160,6 +161,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final ProviderSubscription<MouthTrackingState> _trackingSubscription;
   GameSessionNotifier? _sessionController;
   bool _disposed = false;
+  Timer? _resultTransition;
+  late final ProviderSubscription<GameSessionStateData> _avatarEvents;
 
   @override
   void initState() {
@@ -202,6 +205,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
         }
       },
     );
+    _avatarEvents = ref.listenManual<GameSessionStateData>(
+      gameSessionProvider,
+      (_, next) => _game.avatar.sync(next),
+      fireImmediately: true,
+    );
     _trackingSubscription = ref.listenManual<MouthTrackingState>(
       mouthTrackingProvider,
       _onTrackingChanged,
@@ -234,6 +242,9 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   void dispose() {
     _disposed = true;
     _trackingSubscription.close();
+    _avatarEvents.close();
+    _resultTransition?.cancel();
+    _game.avatar.dispose();
     _game.pauseEngine();
     _lifecycle.dispose();
     _fall.dispose();
@@ -330,6 +341,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(gameSessionProvider);
+    _game.avatar.reducedMotion = MediaQuery.disableAnimationsOf(context);
+    _game.avatar.setAvatar(
+      resolveAvatarState(ref.watch(profileAvatarProvider)),
+    );
     _game.syncSession(
       foods: session.activeFoods,
       isPlaying: session.state == GameSessionState.playing,
@@ -338,9 +353,15 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     ref.listen<GameSessionStateData>(gameSessionProvider, (previous, next) {
       if (previous?.state != GameSessionState.gameOver &&
           next.state == GameSessionState.gameOver) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) context.go('/game-over');
-        });
+        _resultTransition?.cancel();
+        _resultTransition = Timer(
+          MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 600),
+          () {
+            if (mounted) context.go('/game-over');
+          },
+        );
       }
     });
     return Scaffold(
@@ -352,7 +373,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
           final gameView =
               session.state == GameSessionState.playing ||
-                      session.state == GameSessionState.paused
+                      session.state == GameSessionState.paused ||
+                      session.state == GameSessionState.gameOver
                   ? _buildActiveGame(session)
                   : _buildDemoView(w, h, session);
           return Stack(

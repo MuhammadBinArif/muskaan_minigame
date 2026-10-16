@@ -996,21 +996,20 @@ class _BottomSheet extends StatelessWidget {
             valueListenable: faceReady,
             builder:
                 (_, ready, _) =>
-                    _StatusCard(label: 'Face in Frame', isReady: ready),
+                    _StatusCard(label: 'Face Position', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: lightingReady,
             builder:
-                (_, ready, _) =>
-                    _StatusCard(label: 'Neutral Baseline', isReady: ready),
+                (_, ready, _) => _StatusCard(label: 'Lighting', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: biometricReady,
             builder:
                 (_, ready, _) =>
-                    _StatusCard(label: 'Mouth Range', isReady: ready),
+                    _StatusCard(label: 'Mouth Visible', isReady: ready),
           ),
           const SizedBox(height: 16),
 
