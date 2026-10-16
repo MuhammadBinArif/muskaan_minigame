@@ -18,6 +18,9 @@ class CalibrationConfig {
   /// Normalized face size at the neutral calibration pose.
   final double neutralFaceSize;
 
+  /// Horizontal face movement from neutral used to reach a gameplay edge.
+  final double horizontalControlRange;
+
   /// Whether the config has been calibrated by a real session.
   final bool calibrated;
 
@@ -26,6 +29,7 @@ class CalibrationConfig {
     required this.openThreshold,
     this.neutralFacePosition = const Offset(0.5, 0.5),
     this.neutralFaceSize = 0,
+    this.horizontalControlRange = 0.22,
     this.calibrated = true,
   });
 
@@ -51,7 +55,10 @@ class CalibrationConfig {
       neutralFacePosition.dy <= 1.0 &&
       neutralFaceSize.isFinite &&
       neutralFaceSize >= 0.0 &&
-      neutralFaceSize <= 1.0;
+      neutralFaceSize <= 1.0 &&
+      horizontalControlRange.isFinite &&
+      horizontalControlRange >= 0.08 &&
+      horizontalControlRange <= 0.5;
 
   /// The deadband gap between close and open transitions. A wider
   /// band reduces flicker at the cost of responsiveness.
@@ -62,12 +69,15 @@ class CalibrationConfig {
     double? openThreshold,
     Offset? neutralFacePosition,
     double? neutralFaceSize,
+    double? horizontalControlRange,
     bool? calibrated,
   }) => CalibrationConfig(
     closedBaseline: closedBaseline ?? this.closedBaseline,
     openThreshold: openThreshold ?? this.openThreshold,
     neutralFacePosition: neutralFacePosition ?? this.neutralFacePosition,
     neutralFaceSize: neutralFaceSize ?? this.neutralFaceSize,
+    horizontalControlRange:
+        horizontalControlRange ?? this.horizontalControlRange,
     calibrated: calibrated ?? this.calibrated,
   );
 

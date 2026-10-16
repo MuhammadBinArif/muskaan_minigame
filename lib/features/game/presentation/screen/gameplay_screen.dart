@@ -4,12 +4,15 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flame/game.dart';
 
 import 'package:flutter/foundation.dart';
-import 'package:camera/camera.dart' show CameraController, CameraPreview;
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
+import 'package:muskaan_minigame/features/game/domain/face_game_control.dart';
+import 'package:muskaan_minigame/features/game/presentation/flame/muskaan_flame_game.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
+import 'package:muskaan_minigame/features/tracking/domain/face_tracking.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 
 // ============================================================
@@ -151,7 +154,12 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final AnimationController _pulse;
   late final AnimationController _float;
   late final AppLifecycleListener _lifecycle;
+  late final MuskaanFlameGame _game;
+  late final ValueNotifier<FaceGameControlStatus> _controlStatus;
+  late final ValueNotifier<MouthTrackingState> _trackingUi;
+  late final ProviderSubscription<MouthTrackingState> _trackingSubscription;
   GameSessionNotifier? _sessionController;
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -173,6 +181,32 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     )..repeat();
 
     _sessionController = ref.read(gameSessionProvider.notifier);
+    _controlStatus = ValueNotifier(FaceGameControlStatus.searching);
+    _trackingUi = ValueNotifier(ref.read(mouthTrackingProvider));
+    _game = MuskaanFlameGame(
+      controlConfig: _faceControlConfig(ref.read(calibrationConfigProvider)),
+      onControlFrame: (isOpen, isActionable, targetX) {
+        if (_disposed || !mounted) return;
+        ref
+            .read(gameSessionProvider.notifier)
+            .updateMouthTracking(
+              isOpen: isOpen,
+              isActionable: isActionable,
+              mouthX: targetX,
+              mouthY: MuskaanFlameGame.targetY,
+            );
+      },
+      onControlStatusChanged: (status) {
+        if (!_disposed && _controlStatus.value != status) {
+          _controlStatus.value = status;
+        }
+      },
+    );
+    _trackingSubscription = ref.listenManual<MouthTrackingState>(
+      mouthTrackingProvider,
+      _onTrackingChanged,
+      fireImmediately: true,
+    );
     _lifecycle = AppLifecycleListener(
       onPause: _pause,
       onInactive: _pause,
@@ -198,18 +232,69 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
   @override
   void dispose() {
+    _disposed = true;
+    _trackingSubscription.close();
+    _game.pauseEngine();
     _lifecycle.dispose();
     _fall.dispose();
     _pulse.dispose();
     _float.dispose();
     unawaited(_trackingController?.stopTracking());
     _sessionController?.leaveGame();
+    _trackingUi.dispose();
+    _controlStatus.dispose();
     super.dispose();
+  }
+
+  FaceGameControlConfig _faceControlConfig(CalibrationConfig config) =>
+      FaceGameControlConfig(
+        neutralX: config.neutralFacePosition.dx,
+        horizontalRange: config.horizontalControlRange,
+        sensitivity: 1,
+        responsePerSecond: 10,
+      );
+
+  void _onTrackingChanged(
+    MouthTrackingState? previous,
+    MouthTrackingState next,
+  ) {
+    if (_disposed) return;
+    _trackingUi.value = next;
+    _game.setMouthOpen(next.latestTransition.isOpen);
+
+    final unavailable = next.hasCameraError || next.error != null;
+    final status =
+        unavailable
+            ? FaceGameControlStatus.unavailable
+            : switch (next.tracking.status) {
+              FaceTrackingStatus.searching => FaceGameControlStatus.searching,
+              FaceTrackingStatus.tracking => FaceGameControlStatus.tracking,
+              FaceTrackingStatus.temporarilyLost =>
+                FaceGameControlStatus.temporarilyLost,
+              FaceTrackingStatus.lost => FaceGameControlStatus.lost,
+            };
+    _game.applyTracking(
+      FaceGameControlSample(
+        normalizedX:
+            status == FaceGameControlStatus.tracking
+                ? next.tracking.position?.dx
+                : null,
+        status: status,
+        observedAt: next.tracking.lastDetectedAt ?? next.tracking.updatedAt,
+      ),
+    );
+
+    if (unavailable &&
+        ref.read(gameSessionProvider).state == GameSessionState.playing) {
+      ref.read(gameSessionProvider.notifier).pauseGame();
+    }
   }
 
   void _pause() {
     ref.read(gameSessionProvider.notifier).pauseGame();
-    ref.read(mouthTrackingProvider.notifier).stopTracking();
+    _game.pauseControl();
+    _game.pauseEngine();
+    unawaited(ref.read(mouthTrackingProvider.notifier).stopTracking());
   }
 
   Future<void> _resume() async {
@@ -217,6 +302,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
     if (tracking.isStreaming && !tracking.hasCameraError) {
+      _game.resumeControl();
+      _game.resumeEngine();
       ref.read(gameSessionProvider.notifier).resumeGame();
     }
   }
@@ -231,6 +318,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
     if (tracking.isStreaming && !tracking.hasCameraError) {
+      _game.configureControl(
+        _faceControlConfig(ref.read(calibrationConfigProvider)),
+      );
+      _game.resetControl();
+      _game.resumeEngine();
       ref.read(gameSessionProvider.notifier).startGame();
     }
   }
@@ -238,7 +330,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(gameSessionProvider);
-    final trackingState = ref.watch(mouthTrackingProvider);
+    _game.syncSession(
+      foods: session.activeFoods,
+      isPlaying: session.state == GameSessionState.playing,
+    );
 
     ref.listen<GameSessionStateData>(gameSessionProvider, (previous, next) {
       if (previous?.state != GameSessionState.gameOver &&
@@ -248,26 +343,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
         });
       }
     });
-    ref.listen<MouthTrackingState>(mouthTrackingProvider, (prev, next) {
-      if (next.hasCameraError || next.error != null) {
-        ref.read(gameSessionProvider.notifier).pauseGame();
-        return;
-      }
-      if (session.state != GameSessionState.playing ||
-          prev?.latestResult == next.latestResult) {
-        return;
-      }
-      final mouth = next.latestResult;
-      ref
-          .read(gameSessionProvider.notifier)
-          .updateMouthTracking(
-            isOpen: next.latestTransition.isOpen,
-            isActionable: mouth.isActionable,
-            mouthX: mouth.normalizedPosition.dx,
-            mouthY: mouth.normalizedPosition.dy,
-          );
-    });
-
     return Scaffold(
       backgroundColor: _C.bgBot,
       body: LayoutBuilder(
@@ -278,41 +353,50 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           final gameView =
               session.state == GameSessionState.playing ||
                       session.state == GameSessionState.paused
-                  ? _buildActiveGame(w, h, session, trackingState)
-                  : _buildDemoView(w, h, session, trackingState);
+                  ? _buildActiveGame(session)
+                  : _buildDemoView(w, h, session);
           return Stack(
+            fit: StackFit.expand,
             children: [
               Positioned.fill(child: gameView),
-              if (trackingState.hasCameraError || trackingState.error != null)
-                Positioned(
-                  left: 16,
-                  right: 16,
-                  top: MediaQuery.paddingOf(context).top + 64,
-                  child: Material(
-                    color: const Color(0xFF252542),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          Semantics(
-                            liveRegion: true,
-                            child: Text(
-                              trackingState.error ?? 'Camera unavailable',
-                              style: const TextStyle(color: Colors.white),
-                              textAlign: TextAlign.center,
+              ValueListenableBuilder<MouthTrackingState>(
+                valueListenable: _trackingUi,
+                builder: (context, trackingState, _) {
+                  if (!trackingState.hasCameraError &&
+                      trackingState.error == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Positioned(
+                    left: 16,
+                    right: 16,
+                    top: MediaQuery.paddingOf(context).top + 64,
+                    child: Material(
+                      color: const Color(0xFF252542),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          children: [
+                            Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                trackingState.error ?? 'Camera unavailable',
+                                style: const TextStyle(color: Colors.white),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
-                          ),
-                          TextButton(
-                            onPressed:
-                                () => _trackingController?.startTracking(),
-                            child: const Text('Retry camera'),
-                          ),
-                        ],
+                            TextButton(
+                              onPressed:
+                                  () => _trackingController?.startTracking(),
+                              child: const Text('Retry camera'),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
+              ),
             ],
           );
         },
@@ -323,12 +407,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   // ---------------------------------------------------------------------------
   // DEMO / PRE-GAME VIEW
   // ---------------------------------------------------------------------------
-  Widget _buildDemoView(
-    double w,
-    double h,
-    GameSessionStateData session,
-    MouthTrackingState trackingState,
-  ) {
+  Widget _buildDemoView(double w, double h, GameSessionStateData session) {
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -361,8 +440,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                   phase: _phaseFor(session.state),
                   pulse: _pulse,
                   float: _float,
-                  cameraController: trackingState.cameraController,
-                  isMouthOpen: trackingState.latestTransition.isOpen,
                 ),
               ),
             ),
@@ -427,12 +504,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   // ---------------------------------------------------------------------------
   // ACTIVE GAME VIEW
   // ---------------------------------------------------------------------------
-  Widget _buildActiveGame(
-    double w,
-    double h,
-    GameSessionStateData session,
-    MouthTrackingState trackingState,
-  ) {
+  Widget _buildActiveGame(GameSessionStateData session) {
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -443,48 +515,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           ),
         Positioned.fill(
           child: RepaintBoundary(
-            child: _ActiveFoodLayer(
-              foods: session.activeFoods,
-              width: w,
-              height: h,
-            ),
-          ),
-        ),
-        Positioned.fill(
-          child: Align(
-            alignment: const Alignment(0, 0.02),
-            child: RepaintBoundary(
-              child: _MouthRing(
-                phase: _phaseFor(session.state),
-                pulse: _pulse,
-                float: _float,
-                cameraController: trackingState.cameraController,
-                isMouthOpen: trackingState.latestTransition.isOpen,
-              ),
-            ),
-          ),
-        ),
-        if (trackingState.latestResult.isActionable)
-          Positioned(
-            left: trackingState.latestResult.normalizedPosition.dx * w - 14,
-            top: trackingState.latestResult.normalizedPosition.dy * h - 14,
             child: IgnorePointer(
-              child: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color:
-                        trackingState.latestTransition.isOpen
-                            ? _C.mouthGreen
-                            : _C.comboA,
-                    width: 3,
-                  ),
-                ),
-              ),
+              child: GameWidget<MuskaanFlameGame>(game: _game),
             ),
           ),
+        ),
         if (session.recentCollisions.isNotEmpty)
           _buildCollisionBanner(session.recentCollisions.first),
         if (session.recentCollisions.isNotEmpty &&
@@ -511,6 +546,22 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                 ),
                 const SizedBox(height: 8),
                 _ComboPill(combo: session.stats.combo, pulse: _pulse),
+                const SizedBox(height: 6),
+                ValueListenableBuilder<MouthTrackingState>(
+                  valueListenable: _trackingUi,
+                  builder:
+                      (context, trackingState, _) => Text(
+                        trackingState.latestTransition.isOpen
+                            ? 'MOUTH OPEN'
+                            : 'OPEN MOUTH',
+                        style: _T.mouthLabel.copyWith(
+                          color:
+                              trackingState.latestTransition.isOpen
+                                  ? _C.mouthGreen
+                                  : _C.textDim,
+                        ),
+                      ),
+                ),
               ],
             ),
           ),
@@ -528,20 +579,20 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             bottom: 20,
             left: 0,
             right: 0,
-            child: Text(
-              'Open your mouth wide to catch!',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color: _C.textSoft.withValues(alpha: 0.4),
-              ),
+            child: ValueListenableBuilder<FaceGameControlStatus>(
+              valueListenable: _controlStatus,
+              builder:
+                  (context, status, _) => _TrackingInstruction(status: status),
             ),
           ),
         if (!kReleaseMode)
-          _DebugOverlay(
-            trackingState: trackingState,
-            config: ref.watch(calibrationConfigProvider),
+          ValueListenableBuilder<MouthTrackingState>(
+            valueListenable: _trackingUi,
+            builder:
+                (context, trackingState, _) => _DebugOverlay(
+                  trackingState: trackingState,
+                  config: ref.read(calibrationConfigProvider),
+                ),
           ),
       ],
     );
@@ -560,14 +611,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
         ],
       ),
     );
-  }
-
-  /// Bridge for the Flame / camera tracking layer.
-  void handleCollision(FoodItem food, double mouthX, double mouthY) {
-    if (!mounted) return;
-    ref
-        .read(gameSessionProvider.notifier)
-        .handleFoodCollision(food, mouthX, mouthY);
   }
 
   GameplayPhase _phaseFor(GameSessionState state) {
@@ -649,15 +692,11 @@ class _MouthRing extends StatelessWidget {
   final GameplayPhase phase;
   final AnimationController pulse;
   final AnimationController float;
-  final dynamic cameraController;
-  final bool isMouthOpen;
 
   const _MouthRing({
     required this.phase,
     required this.pulse,
     required this.float,
-    this.cameraController,
-    this.isMouthOpen = false,
   });
 
   @override
@@ -670,8 +709,6 @@ class _MouthRing extends StatelessWidget {
             ? _C.mouthGreen
             : isHazard
             ? _C.danger
-            : isMouthOpen
-            ? _C.mouthGreen
             : _C.comboA;
 
     return AnimatedBuilder(
@@ -679,7 +716,7 @@ class _MouthRing extends StatelessWidget {
       builder: (context, _) {
         final p = pulse.value;
         final dy = math.sin(float.value * 2 * math.pi) * 4.0;
-        final scale = 1.0 + (isMouthOpen ? 0.08 : 0.04) * p;
+        final scale = 1.0 + 0.04 * p;
 
         return Transform.translate(
           offset: Offset(0, dy),
@@ -694,39 +731,21 @@ class _MouthRing extends StatelessWidget {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Mirrored circular front camera feed
                       ClipOval(
-                        child: SizedBox(
+                        child: Container(
                           width: 120,
                           height: 120,
-                          child:
-                              cameraController is CameraController &&
-                                      cameraController.value.isInitialized
-                                  ? FittedBox(
-                                    fit: BoxFit.cover,
-                                    child: SizedBox(
-                                      width:
-                                          (cameraController
-                                                      .value
-                                                      .previewSize
-                                                      ?.height ??
-                                                  120)
-                                              .toDouble(),
-                                      height:
-                                          (cameraController
-                                                      .value
-                                                      .previewSize
-                                                      ?.width ??
-                                                  120)
-                                              .toDouble(),
-                                      child: Transform(
-                                        alignment: Alignment.center,
-                                        transform: Matrix4.rotationY(math.pi),
-                                        child: CameraPreview(cameraController),
-                                      ),
-                                    ),
-                                  )
-                                  : null,
+                          alignment: Alignment.center,
+                          decoration: const BoxDecoration(
+                            gradient: RadialGradient(
+                              colors: [Color(0x33252542), Color(0x0014122A)],
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.face_retouching_natural,
+                            size: 44,
+                            color: ringColor.withValues(alpha: 0.7),
+                          ),
                         ),
                       ),
                       CustomPaint(
@@ -765,13 +784,7 @@ class _MouthRing extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  isMouthOpen ? 'MOUTH OPEN' : 'OPEN MOUTH',
-                  style: _T.mouthLabel.copyWith(
-                    color: isMouthOpen ? _C.mouthGreen : _C.textDim,
-                    fontWeight: isMouthOpen ? FontWeight.w900 : FontWeight.w700,
-                  ),
-                ),
+                Text('OPEN MOUTH', style: _T.mouthLabel),
               ],
             ),
           ),
@@ -963,45 +976,49 @@ class _StartOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 64,
-          height: 64,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(colors: [_C.comboA, _C.comboB]),
-            boxShadow: [
-              BoxShadow(
-                color: _C.comboA.withValues(alpha: 0.5),
-                blurRadius: 16,
-                spreadRadius: 4,
-              ),
-            ],
+    final width = math.min(320.0, MediaQuery.sizeOf(context).width - 48);
+    return SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(colors: [_C.comboA, _C.comboB]),
+              boxShadow: [
+                BoxShadow(
+                  color: _C.comboA.withValues(alpha: 0.5),
+                  blurRadius: 16,
+                  spreadRadius: 4,
+                ),
+              ],
+            ),
+            child: const Icon(Icons.play_arrow, size: 40, color: Colors.white),
           ),
-          child: const Icon(Icons.play_arrow, size: 40, color: Colors.white),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          'READY TO PLAY',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            color: Colors.white,
+          const SizedBox(height: 16),
+          const Text(
+            'READY TO PLAY',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Let the street food rush begin',
-          style: TextStyle(fontSize: 12, color: _C.textSoft),
-        ),
-        const SizedBox(height: 24),
-        _PrimaryBtn(label: 'READY', onTap: onStart),
-        const SizedBox(height: 12),
-        _OutlineBtn(label: 'QUIT ROUND', onTap: onQuit),
-      ],
+          const SizedBox(height: 8),
+          const Text(
+            'Let the street food rush begin',
+            style: TextStyle(fontSize: 12, color: _C.textSoft),
+          ),
+          const SizedBox(height: 24),
+          _PrimaryBtn(label: 'READY', onTap: onStart),
+          const SizedBox(height: 12),
+          _OutlineBtn(label: 'QUIT ROUND', onTap: onQuit),
+        ],
+      ),
     );
   }
 }
@@ -1340,45 +1357,52 @@ class _PauseOverlay extends StatelessWidget {
   }
 }
 
-class _ActiveFoodLayer extends StatelessWidget {
-  final List<FoodItem> foods;
-  final double width;
-  final double height;
+class _TrackingInstruction extends StatelessWidget {
+  const _TrackingInstruction({required this.status});
 
-  const _ActiveFoodLayer({
-    required this.foods,
-    required this.width,
-    required this.height,
-  });
+  final FaceGameControlStatus status;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        for (final food in foods)
-          Positioned(
-            left: food.positionX * width - (food.size * width) / 2,
-            top: food.positionY * height - (food.size * height) / 2,
-            child: IgnorePointer(
-              child: _ItemIcon(
-                kind: _itemKindFor(food.type),
-                size: (food.size * width).clamp(24.0, 48.0),
-              ),
-            ),
+    final (label, color) = switch (status) {
+      FaceGameControlStatus.tracking => (
+        'Move your face to aim · Open your mouth to catch',
+        _C.mouthGreen,
+      ),
+      FaceGameControlStatus.temporarilyLost => (
+        'Hold still — reacquiring your face',
+        _C.timerGold,
+      ),
+      FaceGameControlStatus.lost => (
+        'Tracking lost — target paused',
+        _C.danger,
+      ),
+      FaceGameControlStatus.unavailable => (
+        'Camera unavailable — gameplay paused',
+        _C.danger,
+      ),
+      FaceGameControlStatus.paused => ('Tracking paused', _C.textSoft),
+      FaceGameControlStatus.searching => (
+        'Center your face to take control',
+        _C.textSoft,
+      ),
+    };
+    return Semantics(
+      liveRegion: true,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        child: Text(
+          label,
+          key: ValueKey(status),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: color.withValues(alpha: 0.85),
           ),
-      ],
+        ),
+      ),
     );
-  }
-
-  static _ItemKind _itemKindFor(FoodItemType type) {
-    switch (type) {
-      case FoodItemType.gold:
-        return _ItemKind.gold;
-      case FoodItemType.teal:
-        return _ItemKind.teal;
-      case FoodItemType.tea:
-        return _ItemKind.chai;
-    }
   }
 }
 

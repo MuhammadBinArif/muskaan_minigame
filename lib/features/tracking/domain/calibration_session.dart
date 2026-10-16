@@ -99,6 +99,7 @@ class CalibrationSession {
           openThreshold: baseline + gap * 0.6,
           neutralFacePosition: _meanPosition(),
           neutralFaceSize: _mean(_neutralSizes),
+          horizontalControlRange: _horizontalRange(),
           calibrated: true,
         );
         if (!config.isValid) {
@@ -122,4 +123,12 @@ class CalibrationSession {
 
   double _mean(List<double> values) =>
       values.isEmpty ? 0 : values.reduce((a, b) => a + b) / values.length;
+
+  /// A larger calibrated face needs less normalized translation for deliberate
+  /// head movement. Clamp the range so control remains usable across cameras.
+  double _horizontalRange() {
+    final faceSize = _mean(_neutralSizes);
+    if (faceSize == 0) return 0.22;
+    return (faceSize * 0.65).clamp(0.12, 0.30);
+  }
 }
