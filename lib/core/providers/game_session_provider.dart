@@ -31,6 +31,7 @@ class GameSessionStateData {
   final GameSessionRecord? completedRecord;
   final bool isSaving;
   final String? saveError;
+  final int missCount;
 
   const GameSessionStateData({
     required this.state,
@@ -44,6 +45,7 @@ class GameSessionStateData {
     this.completedRecord,
     this.isSaving = false,
     this.saveError,
+    this.missCount = 0,
   });
 
   /// Create initial state data
@@ -199,6 +201,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     _lastTickMs = currentTime;
     final activeFoods = <FoodItem>[];
     var stats = state.stats;
+    var misses = state.missCount;
 
     for (final food in state.activeFoods) {
       if (food.isActive(currentTime, _foodLifetimeMs)) {
@@ -213,6 +216,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
         if (updatedFood.positionY >= 1.0 + updatedFood.size) {
           if (updatedFood.type != FoodItemType.tea) {
             stats = stats.applyMiss();
+            misses++;
           }
         }
 
@@ -224,6 +228,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
     state = state.copyWith(
       stats: stats.updateTimeRemaining(timeRemaining),
+      missCount: misses,
       activeFoods: activeFoods,
     );
 
@@ -523,6 +528,7 @@ extension GameSessionStateDataCopy on GameSessionStateData {
     bool? isSaving,
     String? saveError,
     bool clearSaveError = false,
+    int? missCount,
   }) {
     return GameSessionStateData(
       state: state ?? this.state,
@@ -536,6 +542,7 @@ extension GameSessionStateDataCopy on GameSessionStateData {
       completedRecord: completedRecord ?? this.completedRecord,
       isSaving: isSaving ?? this.isSaving,
       saveError: clearSaveError ? null : saveError ?? this.saveError,
+      missCount: missCount ?? this.missCount,
     );
   }
 }

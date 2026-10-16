@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'avatar_presentation.dart';
 
 import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart' show ValueChanged;
@@ -21,6 +22,7 @@ class MuskaanFlameGame extends FlameGame {
     required this.onControlStatusChanged,
   }) : control = FaceGameControl(config: controlConfig);
 
+  final AvatarPresentation avatar = AvatarPresentation();
   final FaceGameControl control;
   final ControlFrameCallback onControlFrame;
   final ValueChanged<FaceGameControlStatus> onControlStatusChanged;
@@ -69,6 +71,7 @@ class MuskaanFlameGame extends FlameGame {
 
   void resetControl() {
     control.reset();
+    avatar.reset();
     _isMouthOpen = false;
     _reportStatus();
   }
@@ -79,6 +82,7 @@ class MuskaanFlameGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
+    avatar.update(dt);
     control.update(dt);
     _reportStatus();
     if (_isPlaying) {
@@ -168,13 +172,6 @@ class MuskaanFlameGame extends FlameGame {
         ..style = PaintingStyle.stroke
         ..strokeWidth = active ? 3 : 2,
     );
-    canvas.drawCircle(
-      center,
-      radius * 0.32,
-      Paint()
-        ..color = ringColor.withValues(alpha: _isMouthOpen ? 0.65 : 0.25)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
+    avatar.render(canvas, center, radius);
   }
 }

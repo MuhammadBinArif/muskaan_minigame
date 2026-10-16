@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'package:flame/game.dart';
+import 'package:muskaan_minigame/features/game/presentation/flame/muskaan_flame_game.dart';
+import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,8 +22,11 @@ void main() {
     tester,
   ) async {
     final repository = RetryRepository();
+    final avatars = StreamController<ProfileAvatar?>();
+    addTearDown(avatars.close);
     final container = ProviderContainer(
       overrides: [
+        profileAvatarProvider.overrideWith((ref) => avatars.stream),
         cameraServiceProvider.overrideWith((ref) => FakeCameraService()),
         visionServiceProvider.overrideWith((ref) => NullVisionService()),
         gameRecordsRepositoryProvider.overrideWithValue(repository),
@@ -42,6 +49,19 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('READY'));
     await tester.pump();
+    final flame =
+        tester
+            .widget<GameWidget<MuskaanFlameGame>>(
+              find.byType(GameWidget<MuskaanFlameGame>),
+            )
+            .game!;
+    expect(flame.avatar.symbol, '🥷');
+    avatars.add(const ProfileAvatar('🐱'));
+    await tester.pump();
+    expect(flame.avatar.symbol, '🐱');
+    avatars.add(const ProfileAvatar('🦊'));
+    await tester.pump();
+    expect(flame.avatar.symbol, '🦊');
     final game = container.read(gameSessionProvider.notifier);
     for (var i = 0; i < 3; i++) {
       const tea = FoodItem(
@@ -58,7 +78,7 @@ void main() {
       game.updateMouthTracking(isOpen: true, isActionable: true);
     }
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 700));
     final result = game.state.completedRecord!;
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(milliseconds: 500));

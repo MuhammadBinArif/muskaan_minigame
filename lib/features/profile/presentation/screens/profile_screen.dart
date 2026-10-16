@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/profile_avatar.dart';
 import '../../../../shared/widgets/app_bottom_nav.dart';
 
 // ============================================================
@@ -109,7 +112,7 @@ class _T {
 // ============================================================
 // SCREEN
 // ============================================================
-class ProfileScreen extends StatefulWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   /// When true, the "New User" layout is shown (Screens 07).
   final bool isNewUser;
 
@@ -123,10 +126,10 @@ class ProfileScreen extends StatefulWidget {
   });
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _editingName = false;
   late final TextEditingController _nameController;
 
@@ -284,9 +287,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
               alignment: Alignment.center,
-              child: const Text(
-                '🥷',
-                style: TextStyle(fontSize: 52, height: 1.0),
+              child: Text(
+                resolveAvatarState(ref.watch(profileAvatarProvider)).symbol,
+                style: const TextStyle(fontSize: 52, height: 1.0),
               ),
             ),
             // Level badge
