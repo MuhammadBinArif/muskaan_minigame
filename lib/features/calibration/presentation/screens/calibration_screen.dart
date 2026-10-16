@@ -16,8 +16,8 @@ import 'package:muskaan_minigame/features/face_detection/domain/face_detection_p
 // THEME TOKENS  (unchanged)
 // ==========================================
 class AppColors {
-  static const Color backgroundTop = Color(0xFF0D1A0D);
-  static const Color backgroundBottom = Color(0xFF0A100A);
+  static const Color backgroundTop = Color(0xFF17102B);
+  static const Color backgroundBottom = Color(0xFF080612);
   static const Color dashGreen = Color(0xFF3CB371);
   static const Color dashYellow = Color(0x99FFD700);
   static const Color sheetBg = Color(0xFF1A1A2E);
@@ -63,7 +63,7 @@ class AppTypography {
     height: 1.0,
   );
   static const TextStyle helper = TextStyle(
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: FontWeight.w400,
     color: AppColors.helperGrey,
   );
@@ -187,11 +187,13 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
     // If we deferred a navigation while backgrounded, run it now.
     if (_isForeground && _pendingNavigation) {
       _pendingNavigation = false;
-      _navigateAway();
+      unawaited(_navigateAway());
     }
   }
 
-  void _navigateAway() {
+  Future<void> _navigateAway() async {
+    if (!mounted || !context.mounted) return;
+    await _faceDetectionController?.stop();
     if (!mounted || !context.mounted) return;
     context.go('/home-first-time');
   }
@@ -246,7 +248,7 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
           // `context.go` schedules its own frame, guaranteeing the
           // router transition is rendered on the next tick.
           if (_isForeground) {
-            _navigateAway();
+            unawaited(_navigateAway());
           } else {
             // Timer fired while backgrounded — defer until resumed.
             _pendingNavigation = true;
@@ -952,20 +954,21 @@ class _BottomSheet extends StatelessWidget {
             valueListenable: faceReady,
             builder:
                 (_, ready, _) =>
-                    _StatusCard(label: 'Face Position', isReady: ready),
+                    _StatusCard(label: 'Face in Frame', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: lightingReady,
             builder:
-                (_, ready, _) => _StatusCard(label: 'Lighting', isReady: ready),
+                (_, ready, _) =>
+                    _StatusCard(label: 'Single Face', isReady: ready),
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<bool>(
             valueListenable: biometricReady,
             builder:
                 (_, ready, _) =>
-                    _StatusCard(label: 'Biometric Features', isReady: ready),
+                    _StatusCard(label: 'Detection Ready', isReady: ready),
           ),
           const SizedBox(height: 16),
 
@@ -985,8 +988,8 @@ class _BottomSheet extends StatelessWidget {
               final pct = (progress.value * 100).toInt();
               return Text(
                 progress.value >= 1.0
-                    ? 'Extraction complete!'
-                    : 'Extracting landmarks ($pct%)...',
+                    ? 'Face detection ready!'
+                    : 'Checking face stability ($pct%)...',
                 style: AppTypography.helper,
                 textAlign: TextAlign.center,
               );

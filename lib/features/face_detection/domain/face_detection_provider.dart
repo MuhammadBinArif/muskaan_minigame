@@ -62,6 +62,7 @@ class FaceDetectionState {
     FaceDetectionStatus? status,
     CameraStatus? cameraStatus,
     Object? cameraController,
+    bool clearCameraController = false,
     FaceDetectionResult? result,
     String? error,
     bool clearError = false,
@@ -70,7 +71,10 @@ class FaceDetectionState {
     return FaceDetectionState(
       status: status ?? this.status,
       cameraStatus: cameraStatus ?? this.cameraStatus,
-      cameraController: cameraController ?? this.cameraController,
+      cameraController:
+          clearCameraController
+              ? null
+              : cameraController ?? this.cameraController,
       result: result ?? this.result,
       error: clearError ? null : error ?? this.error,
       isProcessing: isProcessing ?? this.isProcessing,
@@ -101,6 +105,7 @@ class FaceDetectionController extends StateNotifier<FaceDetectionState> {
     state = state.copyWith(
       cameraStatus: cameraState.status,
       cameraController: _camera.controller,
+      clearCameraController: _camera.controller == null,
       error: cameraState.errorMessage,
       clearError: cameraState.errorMessage == null,
     );
@@ -117,11 +122,12 @@ class FaceDetectionController extends StateNotifier<FaceDetectionState> {
     );
 
     try {
-      await _camera.initialize();
+      await _camera.initialize().timeout(const Duration(seconds: 12));
       if (_isStale(generation)) return;
       state = state.copyWith(
         cameraStatus: _camera.state.status,
         cameraController: _camera.controller,
+        clearCameraController: _camera.controller == null,
         error: _camera.state.errorMessage,
         clearError: _camera.state.errorMessage == null,
       );
@@ -132,10 +138,12 @@ class FaceDetectionController extends StateNotifier<FaceDetectionState> {
         return;
       }
 
-      await _camera.startStream(
-        maxFps: maxFps,
-        onFrame: (image) => _processFrame(image, generation),
-      );
+      await _camera
+          .startStream(
+            maxFps: maxFps,
+            onFrame: (image) => _processFrame(image, generation),
+          )
+          .timeout(const Duration(seconds: 8));
       if (_isStale(generation)) return;
       state = state.copyWith(
         status: FaceDetectionStatus.searching,
@@ -228,13 +236,12 @@ final faceDetectionServiceProvider = Provider.autoDispose<FaceDetectionService>(
   (ref) => MlKitFaceDetectionService(),
 );
 
-final faceDetectionProvider =
-    StateNotifierProvider.autoDispose<
-      FaceDetectionController,
-      FaceDetectionState
-    >((ref) {
-      return FaceDetectionController(
-        camera: ref.watch(cameraServiceProvider),
-        detector: ref.watch(faceDetectionServiceProvider),
-      );
-    });
+final faceDetectionProvider = StateNotifierProvider.autoDispose<
+  FaceDetectionController,
+  FaceDetectionState
+>((ref) {
+  return FaceDetectionController(
+    camera: ref.watch(cameraServiceProvider),
+    detector: ref.watch(faceDetectionServiceProvider),
+  );
+});

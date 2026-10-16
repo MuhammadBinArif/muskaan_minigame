@@ -227,10 +227,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       context.go('/results');
       return;
     }
-    if (!ref.read(calibrationConfigProvider).calibrated) {
-      context.go('/calibration');
-      return;
-    }
     await ref.read(mouthTrackingProvider.notifier).startTracking();
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
