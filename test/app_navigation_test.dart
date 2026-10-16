@@ -173,9 +173,9 @@ void main() {
       await pumpApp(tester, '/camera-permission');
       await tapAndAdvance(tester, find.text('CONTINUE'));
 
-      expect(find.text('Face in Frame'), findsOneWidget);
-      expect(find.text('Neutral Baseline'), findsOneWidget);
-      expect(find.text('Mouth Range'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
+      expect(find.text('Lighting'), findsOneWidget);
+      expect(find.text('Mouth Visible'), findsOneWidget);
       expect(
         find.text('Analyzing…'),
         findsWidgets,
@@ -215,7 +215,7 @@ void main() {
       tester,
     ) async {
       await pumpApp(tester, '/calibration');
-      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
 
       // Full sequence: 600 + 700 + 200 + 2600 + 400 ≈ 4500 ms
       // Pump 12 × 500 = 6000 ms to cover it with margin.
@@ -225,7 +225,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
       expect(find.text('Welcome to'), findsNothing);
     });
 
@@ -233,13 +233,13 @@ void main() {
       await pumpApp(tester, '/camera-permission');
 
       await tapAndAdvance(tester, find.text('CONTINUE'));
-      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
 
       for (int i = 0; i < 12; i++) {
         await tester.pump(const Duration(milliseconds: 500));
       }
 
-      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
       expect(find.text('Welcome to'), findsNothing);
     });
   });
@@ -562,13 +562,13 @@ void main() {
       expect(find.text('Camera Access'), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('CONTINUE'));
-      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
 
       for (int i = 0; i < 12; i++) {
         await tester.pump(const Duration(milliseconds: 500));
       }
 
-      expect(find.text('Face in Frame'), findsOneWidget);
+      expect(find.text('Face Position'), findsOneWidget);
       expect(find.text('Welcome to'), findsNothing);
     });
 
