@@ -31,6 +31,9 @@ class MuskaanFlameGame extends FlameGame {
   bool _isPlaying = false;
   bool _isMouthOpen = false;
   FaceGameControlStatus? _reportedStatus;
+  CollisionEvent? _feedbackEvent;
+  int? _lastFeedbackTimestamp;
+  double _feedbackAge = 0;
 
   static const double targetY = 0.52;
 
@@ -41,15 +44,28 @@ class MuskaanFlameGame extends FlameGame {
   }
 
   FaceGameControlStatus get controlStatus => control.status;
+  bool get hasActiveFeedback => _feedbackEvent != null;
 
   void configureControl(FaceGameControlConfig config) {
     control.configure(config);
     _reportStatus();
   }
 
-  void syncSession({required List<FoodItem> foods, required bool isPlaying}) {
+  void syncSession({
+    required List<FoodItem> foods,
+    required List<CollisionEvent> recentCollisions,
+    required bool isPlaying,
+  }) {
     _foods = List<FoodItem>.unmodifiable(foods);
     _isPlaying = isPlaying;
+    if (recentCollisions.isNotEmpty) {
+      final latest = recentCollisions.first;
+      if (latest.timestamp != _lastFeedbackTimestamp) {
+        _lastFeedbackTimestamp = latest.timestamp;
+        _feedbackEvent = latest;
+        _feedbackAge = 0;
+      }
+    }
   }
 
   void setMouthOpen(bool isOpen) => _isMouthOpen = isOpen;
@@ -73,6 +89,9 @@ class MuskaanFlameGame extends FlameGame {
     control.reset();
     avatar.reset();
     _isMouthOpen = false;
+    _feedbackEvent = null;
+    _lastFeedbackTimestamp = null;
+    _feedbackAge = 0;
     _reportStatus();
   }
 
@@ -82,6 +101,10 @@ class MuskaanFlameGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
+    if (_feedbackEvent != null) {
+      _feedbackAge += dt;
+      if (_feedbackAge >= .65) _feedbackEvent = null;
+    }
     avatar.update(dt);
     control.update(dt);
     _reportStatus();
@@ -97,6 +120,7 @@ class MuskaanFlameGame extends FlameGame {
       _drawFood(canvas, food);
     }
     _drawTarget(canvas);
+    _drawFeedback(canvas);
   }
 
   void _reportStatus() {
@@ -109,10 +133,15 @@ class MuskaanFlameGame extends FlameGame {
     if (size.x <= 0 || size.y <= 0) return;
     final center = Offset(food.positionX * size.x, food.positionY * size.y);
     final radius = (food.size * size.x / 2).clamp(12.0, 24.0);
+    final rotation =
+        food.positionY * 2.2 + (food.creationTime % 997) / 997 * math.pi;
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(rotation);
     if (food.type == FoodItemType.tea) {
       final rect = RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: center,
+          center: Offset.zero,
           width: radius * 1.7,
           height: radius * 1.35,
         ),
@@ -126,18 +155,66 @@ class MuskaanFlameGame extends FlameGame {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2,
       );
+      canvas.restore();
       return;
     }
     final color =
         food.type == FoodItemType.gold
             ? const Color(0xFFFFD86B)
             : const Color(0xFF3FB39A);
-    canvas.drawCircle(center, radius, Paint()..color = color);
+    canvas.drawCircle(Offset.zero, radius, Paint()..color = color);
     canvas.drawCircle(
-      center.translate(-radius * 0.25, -radius * 0.3),
+      Offset(-radius * 0.25, -radius * 0.3),
       radius * 0.28,
       Paint()..color = const Color(0x66FFFFFF),
     );
+    canvas.restore();
+  }
+
+  void _drawFeedback(Canvas canvas) {
+    final event = _feedbackEvent;
+    if (event == null || size.x <= 0 || size.y <= 0) return;
+    final t = (_feedbackAge / .65).clamp(0.0, 1.0);
+    final center = Offset(event.mouthX * size.x, event.mouthY * size.y);
+    final color =
+        event.isCatch
+            ? (event.foodType == FoodItemType.gold
+                ? const Color(0xFFFFD86B)
+                : const Color(0xFF3DD68C))
+            : const Color(0xFFFF6B83);
+    final paint = Paint()..color = color.withValues(alpha: (1 - t) * .8);
+    final radius = 24 + 54 * t;
+    canvas.drawCircle(
+      center,
+      radius,
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3 * (1 - t) + 1,
+    );
+    if (event.isCatch) {
+      for (var i = 0; i < 6; i++) {
+        final angle = i * math.pi / 3;
+        final particle =
+            center + Offset(math.cos(angle), math.sin(angle)) * radius;
+        canvas.drawCircle(
+          particle,
+          4 * (1 - t) + 1,
+          paint..style = PaintingStyle.fill,
+        );
+      }
+    } else {
+      final cross = radius * .35;
+      canvas.drawLine(
+        center - Offset(cross, cross),
+        center + Offset(cross, cross),
+        paint..strokeWidth = 4,
+      );
+      canvas.drawLine(
+        center + Offset(cross, -cross),
+        center - Offset(cross, -cross),
+        paint,
+      );
+    }
   }
 
   void _drawTarget(Canvas canvas) {

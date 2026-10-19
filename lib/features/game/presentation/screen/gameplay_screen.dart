@@ -84,26 +84,6 @@ class _T {
     height: 1.0,
     letterSpacing: 0.5,
   );
-  static const plus = TextStyle(
-    fontSize: 26,
-    fontWeight: FontWeight.w900,
-    color: _C.scoreGold,
-    height: 1.0,
-  );
-  static const hazard = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w900,
-    color: Colors.white,
-    letterSpacing: 1.5,
-    height: 1.0,
-  );
-  static const hazardSub = TextStyle(
-    fontSize: 10,
-    fontWeight: FontWeight.w700,
-    color: _C.danger,
-    letterSpacing: 2,
-    height: 1.0,
-  );
   static const pauseTitle = TextStyle(
     fontSize: 12,
     fontWeight: FontWeight.w700,
@@ -347,6 +327,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     );
     _game.syncSession(
       foods: session.activeFoods,
+      recentCollisions: session.recentCollisions,
       isPlaying: session.state == GameSessionState.playing,
     );
 
@@ -542,11 +523,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             ),
           ),
         ),
-        if (session.recentCollisions.isNotEmpty)
-          _buildCollisionBanner(session.recentCollisions.first),
-        if (session.recentCollisions.isNotEmpty &&
-            session.recentCollisions.first.isCatch)
-          Positioned.fill(child: _PlusPop(pulse: _pulse)),
         Positioned(
           top: 0,
           left: 0,
@@ -617,21 +593,6 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                 ),
           ),
       ],
-    );
-  }
-
-  Widget _buildCollisionBanner(CollisionEvent event) {
-    if (event.isCatch) return const SizedBox.shrink();
-    return Align(
-      alignment: const Alignment(0, 0.02),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: const [
-          Text('HOT CHAI!!', style: _T.hazard),
-          SizedBox(height: 6),
-          Text('-LIFE', style: _T.hazardSub),
-        ],
-      ),
     );
   }
 
@@ -1262,32 +1223,6 @@ class _ComboPill extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _PlusPop extends StatelessWidget {
-  final AnimationController pulse;
-
-  const _PlusPop({required this.pulse});
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: const Alignment(0, -0.15),
-      child: AnimatedBuilder(
-        animation: pulse,
-        builder: (context, _) {
-          final p = pulse.value;
-          return Opacity(
-            opacity: 0.6 + 0.4 * p,
-            child: Transform.scale(
-              scale: 1.0 + 0.15 * p,
-              child: const Text('+100', style: _T.plus),
-            ),
-          );
-        },
-      ),
     );
   }
 }
