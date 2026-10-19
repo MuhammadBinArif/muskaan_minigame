@@ -140,25 +140,29 @@ class _ModeSelectScreenState extends State<ModeSelectScreen>
       curve: const Interval(0.0, 0.35, curve: Curves.easeIn),
     );
 
-    _sheetSlide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(
-          CurvedAnimation(
-            parent: _entry,
-            curve: const Interval(0.0, 0.50, curve: Curves.easeOutCubic),
-          ),
-        );
+    _sheetSlide = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _entry,
+        curve: const Interval(0.0, 0.50, curve: Curves.easeOutCubic),
+      ),
+    );
 
     _titleFade = CurvedAnimation(
       parent: _entry,
       curve: const Interval(0.35, 0.55, curve: Curves.easeOut),
     );
-    _titleSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
-        .animate(
-          CurvedAnimation(
-            parent: _entry,
-            curve: const Interval(0.35, 0.55, curve: Curves.easeOutBack),
-          ),
-        );
+    _titleSlide = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _entry,
+        curve: const Interval(0.35, 0.55, curve: Curves.easeOutBack),
+      ),
+    );
 
     _cardFades = List<Animation<double>>.generate(_modes.length, (i) {
       return CurvedAnimation(
@@ -405,25 +409,13 @@ class _ModeCard extends StatelessWidget {
           curve: Curves.easeOut,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: selected
-                ? mode.accent.withValues(alpha: 0.10)
-                : AppColors.cardBg,
+            color: AppColors.cardBg,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: selected
-                  ? mode.accent.withValues(alpha: 0.55)
-                  : Colors.transparent,
-              width: 1.5,
+              color: selected ? AppColors.accentOrange : Colors.transparent,
+              width: selected ? 2 : 1,
             ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: mode.accent.withValues(alpha: 0.35),
-                      blurRadius: 14,
-                      spreadRadius: 0.5,
-                    ),
-                  ]
-                : null,
+            boxShadow: null,
           ),
           child: Row(
             children: [
@@ -466,9 +458,10 @@ class _ModeCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: selected
-                        ? AppColors.accentOrange
-                        : AppColors.dragHandle,
+                    color:
+                        selected
+                            ? AppColors.accentOrange
+                            : AppColors.dragHandle,
                     width: 2,
                   ),
                 ),

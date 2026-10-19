@@ -74,7 +74,9 @@ class AppTypography {
 
 class _Timings {
   static const Duration extractionDuration = Duration(milliseconds: 2600);
-  static const Duration postCompletionHold = Duration(milliseconds: 400);
+  static const Duration postCompletionHold = Duration(milliseconds: 1200);
+  static const Duration progressStep = Duration(milliseconds: 260);
+  static const Duration completionFill = Duration(milliseconds: 520);
   static const Duration pulse = Duration(milliseconds: 1400);
   static const Duration scanner = Duration(milliseconds: 1800);
 }
@@ -221,16 +223,32 @@ class _CalibrationScreenState extends ConsumerState<CalibrationScreen>
       faceSize: tracking.tracking.faceSize,
     );
     _lightingReady.value = _calibration.step != CalibrationStep.closed;
-    _progressController.value = _calibration.progress;
+    unawaited(
+      _progressController.animateTo(
+        _calibration.progress,
+        duration: _Timings.progressStep,
+        curve: Curves.easeOutCubic,
+      ),
+    );
     if (mounted) setState(() => _instruction = _calibration.instruction);
     final config = _calibration.result;
     if (config == null) return;
     _sequenceStarted = true;
     _biometricReady.value = true;
+    unawaited(
+      _progressController.animateTo(
+        1,
+        duration: _Timings.completionFill,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    if (mounted) {
+      setState(() => _instruction = 'Analysis complete. Preparing your game…');
+    }
     ref.read(calibrationConfigProvider.notifier).state = config;
     _trackingController?.updateCalibration(config);
     _navTimer = Timer(_Timings.postCompletionHold, () {
-      if (!mounted) return;
+      if (!mounted || !_sequenceStarted) return;
       if (_isForeground) {
         unawaited(_navigateAway());
       } else {
@@ -1029,8 +1047,8 @@ class _BottomSheet extends StatelessWidget {
               final pct = (progress.value * 100).toInt();
               return Text(
                 progress.value >= 1.0
-                    ? 'Tracking calibration ready!'
-                    : 'Calibrating tracking ($pct%)...',
+                    ? 'Analysis complete — starting your game…'
+                    : 'Analyzing face and mouth position ($pct%)…',
                 style: AppTypography.helper,
                 textAlign: TextAlign.center,
               );
