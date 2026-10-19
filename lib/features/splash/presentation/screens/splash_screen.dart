@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:muskaan_minigame/shared/widgets/soap_bubble.dart';
+import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -176,7 +176,7 @@ class _SplashScreenState extends State<SplashScreen>
               left: 24,
               child: Opacity(
                 opacity: 0.55,
-                child: const SoapBubbles.square(size: 40),
+                child: const GolgappaIcon(size: 40),
               ),
             ),
             _buildFloatingEmoji(
@@ -307,7 +307,7 @@ class _SplashScreenState extends State<SplashScreen>
                 child: child,
               );
             },
-            child: const SoapBubbles.square(size: 180),
+            child: const GolgappaIcon(size: 180),
           ),
         ],
       ),

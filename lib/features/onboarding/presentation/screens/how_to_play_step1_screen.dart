@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -114,7 +115,7 @@ class _HowToPlayStep1ScreenState extends State<HowToPlayStep1Screen>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const SizedBox(height: 24),
-                        _buildIllustration('📱'),
+                        _buildIllustration(),
                         const SizedBox(height: 32),
                         const Text(
                           'Position Your Face',
@@ -148,7 +149,7 @@ class _HowToPlayStep1ScreenState extends State<HowToPlayStep1Screen>
   }
 
   // ---------------------------------------------------------------------------
-  Widget _buildIllustration(String emoji) {
+  Widget _buildIllustration() {
     return SizedBox(
       width: 220,
       height: 220,
@@ -177,7 +178,7 @@ class _HowToPlayStep1ScreenState extends State<HowToPlayStep1Screen>
                 ),
               ),
               // Central emoji icon
-              Text(emoji, style: const TextStyle(fontSize: 76)),
+              const FacePhoneIllustration(size: 150),
               // Floating yellow dot (top-right)
               Positioned(
                 top: 34,

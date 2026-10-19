@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show PathMetric;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -284,19 +285,17 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                 ),
 
                 // ---- Falling 🫧 (phase 0) ----
-                _fallingEmoji(
-                  emoji: '🫧',
+                _fallingFood(
+                  food: const GolgappaIcon(size: 24),
                   phaseOffset: 0.0,
                   leftFraction: 0.30,
-                  fontSize: 20,
                   totalHeight: 240,
                 ),
                 // ---- Falling ⭐ (phase 0.5, right side) ----
-                _fallingEmoji(
-                  emoji: '⭐',
+                _fallingFood(
+                  food: const GolgappaIcon(size: 22, pani: true),
                   phaseOffset: 0.45,
                   leftFraction: 0.70,
-                  fontSize: 18,
                   totalHeight: 240,
                 ),
 
@@ -313,11 +312,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
   }
 
-  Widget _fallingEmoji({
-    required String emoji,
+  Widget _fallingFood({
+    required Widget food,
     required double phaseOffset,
     required double leftFraction,
-    required double fontSize,
     required double totalHeight,
   }) {
     // Sawtooth: t goes 0→1, emoji moves top→bottom, then wraps.
@@ -325,19 +323,17 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     // Start slightly above and end slightly below for a clean loop.
     final y = -30 + t * (totalHeight + 60);
     // Fade in during first 10%, fade out during last 20%
-    final opacity = t < 0.1
-        ? t / 0.1
-        : t > 0.8
-        ? (1 - t) / 0.2
-        : 1.0;
+    final opacity =
+        t < 0.1
+            ? t / 0.1
+            : t > 0.8
+            ? (1 - t) / 0.2
+            : 1.0;
 
     return Positioned(
       top: y,
       left: leftFraction * 180, // card width
-      child: Opacity(
-        opacity: opacity.clamp(0.0, 1.0),
-        child: Text(emoji, style: TextStyle(fontSize: fontSize)),
-      ),
+      child: Opacity(opacity: opacity.clamp(0.0, 1.0), child: food),
     );
   }
 
@@ -502,19 +498,21 @@ class DashedOvalPainter extends CustomPainter {
     final path = Path()..addOval(rect);
 
     // 1) Glow stroke (blurred, alpha pulses)
-    final glowPaint = Paint()
-      ..color = AppColors.accentOrange.withValues(alpha: glowAlpha)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 6
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+    final glowPaint =
+        Paint()
+          ..color = AppColors.accentOrange.withValues(alpha: glowAlpha)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
     canvas.drawPath(path, glowPaint);
 
     // 2) Dashed stroke on top
-    final dashPaint = Paint()
-      ..color = AppColors.accentOrange.withValues(alpha: 0.6)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
+    final dashPaint =
+        Paint()
+          ..color = AppColors.accentOrange.withValues(alpha: 0.6)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..strokeCap = StrokeCap.round;
 
     final dashPath = _dashPath(path, dashLength: 6.0, gapLength: 4.0);
     canvas.drawPath(dashPath, dashPaint);
