@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -115,7 +116,7 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const SizedBox(height: 24),
-                        _buildIllustration('😮'),
+                        _buildIllustration(),
                         const SizedBox(height: 32),
                         const Text(
                           'Open Your Mouth to Catch',
@@ -149,7 +150,7 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
     );
   }
 
-  Widget _buildIllustration(String emoji) {
+  Widget _buildIllustration() {
     return SizedBox(
       width: 220,
       height: 220,
@@ -176,7 +177,15 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
                   ),
                 ),
               ),
-              Text(emoji, style: const TextStyle(fontSize: 76)),
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  GolgappaIcon(size: 74),
+                  SizedBox(width: 16),
+                  GolgappaIcon(size: 64, pani: true),
+                ],
+              ),
               Positioned(
                 top: 34,
                 right: 24,
@@ -241,25 +250,33 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: const [
               _ScoreItem(
-                emoji: '🫧',
+                icon: GolgappaIcon(size: 28),
                 value: '+100',
                 label: 'Gol Gappa',
                 negative: false,
               ),
               _ScoreItem(
-                emoji: '🫙',
+                icon: GolgappaIcon(size: 28, pani: true),
                 value: '+50',
                 label: 'Pani Puri',
                 negative: false,
               ),
               _ScoreItem(
-                emoji: '⭐',
+                icon: Icon(
+                  Icons.star_rounded,
+                  color: AppColors.accentGold,
+                  size: 28,
+                ),
                 value: '+150',
                 label: 'Bonus',
                 negative: false,
               ),
               _ScoreItem(
-                emoji: '🍵',
+                icon: Icon(
+                  Icons.local_cafe_rounded,
+                  color: Colors.white70,
+                  size: 26,
+                ),
                 value: '−1 ❤️',
                 label: 'Hot Tea',
                 negative: true,
@@ -371,13 +388,13 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
 // SCORE ITEM
 // ==========================================
 class _ScoreItem extends StatelessWidget {
-  final String emoji;
+  final Widget icon;
   final String value;
   final String label;
   final bool negative;
 
   const _ScoreItem({
-    required this.emoji,
+    required this.icon,
     required this.value,
     required this.label,
     required this.negative,
@@ -388,7 +405,7 @@ class _ScoreItem extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(emoji, style: const TextStyle(fontSize: 20)),
+        icon,
         const SizedBox(height: 2),
         Text(
           value,
