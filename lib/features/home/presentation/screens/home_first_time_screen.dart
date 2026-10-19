@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:muskaan_minigame/shared/widgets/soap_bubble.dart';
+import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 import '../../../../shared/widgets/app_bottom_nav.dart';
 
@@ -71,7 +71,7 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
   // ── SHIMMER ── 1.4 s linear loop, drives a bright band sweeping the title
   late final AnimationController _shimmer;
 
-  // ── FLOAT ── 2.4 s loop, bobs the 🫧 bubble ±14 px
+  // ── FLOAT ── 2.4 s loop, bobs the golgappa illustration ±14 px
   late final AnimationController _float;
 
   // ── GLOW ── 1.6 s ping-pong, breathes the three feature cards' halos
@@ -159,8 +159,8 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
                       ),
                       const SizedBox(height: 16),
 
-                      // ---- Floating bubble ----
-                      _buildFloatingBubble(),
+                      // ---- Floating golgappa ----
+                      _buildFloatingGolgappa(),
 
                       const SizedBox(height: 20),
 
@@ -226,10 +226,10 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // FLOATING BUBBLE — amplitude raised to ±14 px, cycle shortened to 2.4 s
+  // FLOATING GOLGAPPA — shared with onboarding food artwork.
   // so the bob is clearly visible without being distracting.
   // ---------------------------------------------------------------------------
-  Widget _buildFloatingBubble() {
+  Widget _buildFloatingGolgappa() {
     return SizedBox(
       height: 140,
       child: Center(
@@ -239,7 +239,7 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
             final dy = math.sin(_float.value * 2 * math.pi) * 14.0;
             return Transform.translate(offset: Offset(0, dy), child: child);
           },
-          child: const SoapBubbles.square(size: 120),
+          child: const GolgappaIcon(size: 120),
         ),
       ),
     );
