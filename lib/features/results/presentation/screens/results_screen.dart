@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/domain/game_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
+import 'package:muskaan_minigame/features/ads/ad_service.dart';
 import '../../../../shared/widgets/app_bottom_nav.dart';
 
 // ==========================================
@@ -90,14 +91,39 @@ class AppTypography {
 // ==========================================
 // RESULTS SCREEN
 // ==========================================
-class ResultsScreen extends ConsumerWidget {
+class ResultsScreen extends ConsumerStatefulWidget {
   final GameSessionRecord? gameRecord;
 
   const ResultsScreen({super.key, this.gameRecord});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final record = gameRecord ?? _emptyRecord();
+  ConsumerState<ResultsScreen> createState() => _ResultsScreenState();
+}
+
+class _ResultsScreenState extends ConsumerState<ResultsScreen>
+    with WidgetsBindingObserver {
+  bool _replayStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _replayStarted = false;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final record = widget.gameRecord ?? _emptyRecord();
 
     return Scaffold(
       backgroundColor: AppColors.backgroundBottom,
@@ -115,6 +141,7 @@ class ResultsScreen extends ConsumerWidget {
             record: record,
             isNewBest: record.isNewBest,
             onPlayAgain: () {
+              if (_replayStarted) return;
               final session = ref.read(gameSessionProvider);
               if (session.isSaving || session.saveError != null) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -126,7 +153,18 @@ class ResultsScreen extends ConsumerWidget {
                 );
                 return;
               }
-              context.go('/countdown');
+              _replayStarted = true;
+              if (widget.gameRecord == null) {
+                context.go('/countdown');
+                return;
+              }
+              ref
+                  .read(adServiceProvider)
+                  .replay(
+                    continueToCountdown: () {
+                      if (context.mounted) context.go('/countdown');
+                    },
+                  );
             },
           ),
         ),
