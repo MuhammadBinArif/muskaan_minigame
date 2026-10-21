@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:muskaan_minigame/features/ads/ad_service.dart';
 
 import '../../domain/profile_avatar.dart';
 import '../../../../shared/widgets/app_bottom_nav.dart';
@@ -214,6 +215,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     _buildAchievements(),
                     const SizedBox(height: 20),
                     _buildLevelProgress(),
+                    if (ref.read(adServiceProvider).privacyOptionsRequired)
+                      TextButton(
+                        onPressed: () async {
+                          final shown =
+                              await ref
+                                  .read(adServiceProvider)
+                                  .showPrivacyOptions();
+                          if (!shown && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Privacy choices are unavailable. Please try again.',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('Advertising privacy choices'),
+                      ),
                   ],
                 ),
               ),
@@ -373,9 +393,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 height: 30,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: _editingName
-                      ? _C.green.withValues(alpha: 0.15)
-                      : _C.cardSoft,
+                  color:
+                      _editingName
+                          ? _C.green.withValues(alpha: 0.15)
+                          : _C.cardSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
@@ -534,14 +555,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             border: Border.all(
               color: unlocked ? _C.orange.withValues(alpha: 0.5) : _C.border,
             ),
-            boxShadow: unlocked
-                ? [
-                    BoxShadow(
-                      color: _C.orange.withValues(alpha: 0.25),
-                      blurRadius: 10,
-                    ),
-                  ]
-                : null,
+            boxShadow:
+                unlocked
+                    ? [
+                      BoxShadow(
+                        color: _C.orange.withValues(alpha: 0.25),
+                        blurRadius: 10,
+                      ),
+                    ]
+                    : null,
           ),
           child: Text(
             a.emoji,
