@@ -1,0 +1,40 @@
+# Phase 6: Android release handoff
+
+Status: **blocked for a signed release** until the owner supplies a production package identity decision, signing credentials, AdMob IDs, privacy policy, and Play Console declarations. No Play upload or production ad activation has been performed.
+
+## Verified configuration
+
+- Flutter 3.47.7 / Dart 3.13.5; Android application ID and namespace `com.example.muskaan_minigame`; version `1.0.0+1`; min SDK 24, target/compile SDK 36 in the current Flutter toolchain. The sample-style application ID is stable in this repository but must be confirmed with the owner **before the first Play upload**, because Play package IDs cannot be changed after publication. Increment the `+` build number for every later upload.
+- Android debug builds use Google's sample AdMob app and unit IDs. Release builds now require real app and interstitial/rewarded unit IDs plus owner-provided release signing variables; the debug key cannot sign release. There are no production IDs or signing credentials in this repository. The rewarded unit is loaded but has no player-facing reward action yet.
+- Camera permission is used for on-device face/mouth tracking. Camera capture has audio disabled; microphone and legacy shared-storage permissions are removed from the merged app manifest. Advertising requests are plain `AdRequest()` calls and do not contain camera frames, landmarks, avatar, score, or records. Google Mobile Ads/UMP may still process device/network identifiers; the owner must validate Data safety and the privacy policy against current SDK disclosures.
+- UMP consent is refreshed before ad requests; requests are gated on `canRequestAds`. Privacy options appear in profile when UMP says they are required. Ads failing or unavailable do not block gameplay. Interstitials are considered only at replay, every third replay with a three-minute minimum gap; no mid-game ad. SDK/device behavior remains unverified without a physical Android device and AdMob account configuration.
+- Automated tests cover navigation, permissions, tracking recovery, game state, scoring, results/replay, records, duplicate saves, pause/resume, ad fallback and one-shot reward callbacks. Tests do not prove physical camera, live ads, consent geography, performance, or accessibility on device. No CI workflow or crash-reporting SDK is present. The profile has a placeholder returning-user name (`Blaven Name`) and hardcoded demo score, game count, win rate, level, XP, and achievements. These must be replaced by real persisted data or clearly labeled/removed before release. The router also retains an unused `PlaceholderScreen`.
+
+## Owner decisions and Google Play checklist
+
+1. Confirm the application ID, developer account type/eligibility, app ownership, intended audience/age, countries, category, support contact, languages, and whether the game is directed at children. The presence of a camera and ads makes age/ads policy decisions consequential; do not guess them.
+2. Provide a public privacy policy URL explaining camera processing, local game records, Google Mobile Ads/UMP data use, consent choices and contact details. Check the actual SDK data disclosures and complete Play **Data safety**, **Contains ads**, **Target audience**, **Content rating**, **App access** (if relevant), and permission declarations. Validate the final AAB permissions in Play Console.
+3. Supply final store icon (512×512), feature graphic (1024×500), screenshots captured from the actual app, support email and optional website/phone, category, and release notes. The Flutter launcher icon is currently the stock template and is not acceptable as final brand art.
+4. Create/verify the AdMob app and real units, configure UMP messages and privacy options for applicable regions, register test devices, and complete app-readiness review. Link a developer-owned website and publish `app-ads.txt` with the account's actual publisher line where required. Never use live ads for manual testing or invent account identifiers.
+5. Choose Play App Signing and protect the upload key. Create a keystore outside the repository, back it up securely, and provide its path/password/alias/password only as local environment variables. Do not commit credentials. Check Google Play's current target API and testing requirements for this account at submission time; requirements vary by date/account and cannot be proven from source.
+6. Test an internally distributed signed AAB on physical devices: fresh install, denied/granted camera, no-front-camera, face loss/recovery, full game/replay, records, background/foreground, offline/poor network, UMP regional states, privacy options, ad load failure, orientation/text scaling, TalkBack, memory/thermal behavior, and crash logs. Complete a closed test if Play Console requires it for this account.
+
+Official references: [Play release requirements](https://support.google.com/googleplay/android-developer/answer/9859152), [target API requirements](https://support.google.com/googleplay/android-developer/answer/11926878), [Data safety](https://support.google.com/googleplay/android-developer/answer/10787469), [AdMob consent](https://developers.google.com/admob/flutter/privacy), [app-ads.txt](https://support.google.com/admob/answer/9363762), [Flutter Android deployment](https://docs.flutter.dev/deployment/android).
+
+## Draft listing and release notes
+
+Suggested short description: “Play a camera-controlled minigame using your smile and mouth movements.”
+
+Suggested full description: “Muskaan Minigame is a playful camera-controlled game. Follow the onboarding steps to allow camera access and calibrate face tracking, then use mouth movements to play. See your results, replay, and review past sessions. The game can continue when an ad is unavailable. Camera access is required for face controls.” Review this text against the final installed build and age/audience decisions.
+
+Suggested release notes: “First Android release: camera-based face controls, calibration, game results, replay, and local play history.”
+
+## Controlled build procedure
+
+1. Resolve the owner decisions and device-test findings above. Set a unique `versionCode` higher than every prior Play upload (`pubspec.yaml` `+` suffix or `--build-number`). Verify real app/unit IDs against the AdMob account.
+2. Keep the upload keystore outside the repository. In a private local shell, set `MUSKAAN_STORE_FILE` (absolute path), `MUSKAAN_STORE_PASSWORD`, `MUSKAAN_KEY_ALIAS`, and `MUSKAAN_KEY_PASSWORD`. Do not paste their values into logs, tickets, or commits.
+3. Run `flutter pub get`, `dart format --output=none --set-exit-if-changed .`, `flutter analyze`, and `flutter test`. Resolve failures; do not bypass release checks.
+4. Supply the real app ID as Android Gradle property `admobAppId` through a private, untracked Gradle configuration or `ORG_GRADLE_PROJECT_admobAppId` environment variable. Build with `flutter build appbundle --release --dart-define=ADMOB_INTERSTITIAL_ID=<real-unit> --dart-define=ADMOB_REWARDED_ID=<real-unit>`. Release Gradle checks reject missing/sample IDs and missing signing variables. Do not use this command until all values are available.
+5. Verify `build/app/outputs/bundle/release/app-release.aab` exists; inspect package ID, version, merged permissions, upload certificate fingerprint, and Play pre-launch report. Upload first to an authorized internal track; do not promote to production until policy, consent, device, and owner reviews pass.
+
+Code shrinking follows the Flutter/Android Gradle release defaults; no custom ProGuard rules were added without a verified release bundle and runtime test. Dependency versions are locked in `pubspec.lock`; review outdated packages and advisories before launch, especially the forced `permission_handler_android` override.

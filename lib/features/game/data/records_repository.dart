@@ -107,9 +107,9 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   @override
   Stream<List<GameSessionRecord>> watchAllSessions() {
     try {
-      return _database
-          .getAllSessionsStream()
-          .map((records) => records.map(_toDomainRecord).toList());
+      return _database.getAllSessionsStream().map(
+        (records) => records.map(_toDomainRecord).toList(),
+      );
     } catch (e, st) {
       throw GameRepositoryException('Failed to watch sessions: $e', e, st);
     }
@@ -159,25 +159,32 @@ final gameRecordsRepositoryProvider = Provider<GameRecordsRepository>((ref) {
 });
 
 /// Stream provider for all completed game sessions.
-final allRecordsStreamProvider = StreamProvider.autoDispose<List<GameSessionRecord>>((ref) {
-  final repo = ref.watch(gameRecordsRepositoryProvider);
-  return repo.watchAllSessions();
-});
+final allRecordsStreamProvider =
+    StreamProvider.autoDispose<List<GameSessionRecord>>((ref) {
+      final repo = ref.watch(gameRecordsRepositoryProvider);
+      return repo.watchAllSessions();
+    });
 
 /// Stream provider for the best game session.
-final bestRecordStreamProvider = StreamProvider.autoDispose<GameSessionRecord?>((ref) {
-  final repo = ref.watch(gameRecordsRepositoryProvider);
-  return repo.watchAllSessions().map((sessions) {
-    if (sessions.isEmpty) return null;
-    return sessions.reduce((curr, next) => curr.score >= next.score ? curr : next);
-  });
-});
+final bestRecordStreamProvider = StreamProvider.autoDispose<GameSessionRecord?>(
+  (ref) {
+    final repo = ref.watch(gameRecordsRepositoryProvider);
+    return repo.watchAllSessions().map((sessions) {
+      if (sessions.isEmpty) return null;
+      return sessions.reduce(
+        (curr, next) => curr.score >= next.score ? curr : next,
+      );
+    });
+  },
+);
 
 /// Future provider for the best record (useful for one-shot reads).
-final bestRecordFutureProvider = FutureProvider.autoDispose<GameSessionRecord?>((ref) {
-  final repo = ref.watch(gameRecordsRepositoryProvider);
-  return repo.getBestSession();
-});
+final bestRecordFutureProvider = FutureProvider.autoDispose<GameSessionRecord?>(
+  (ref) {
+    final repo = ref.watch(gameRecordsRepositoryProvider);
+    return repo.getBestSession();
+  },
+);
 
 /// Custom exception for repository errors.
 class GameRepositoryException implements Exception {

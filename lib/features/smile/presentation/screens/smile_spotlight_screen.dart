@@ -507,32 +507,35 @@ class _RingPainter extends CustomPainter {
     final rect = Rect.fromCircle(center: center, radius: radius);
 
     // Track
-    final trackPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..color = trackColor;
+    final trackPaint =
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth
+          ..color = trackColor;
     canvas.drawCircle(center, radius, trackPaint);
 
     // Progress arc (swept clockwise starting from the top)
     if (progress > 0) {
-      final progressPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round
-        ..shader = SweepGradient(
-          startAngle: -math.pi / 2,
-          endAngle: 3 * math.pi / 2,
-          colors: [startColor, endColor],
-          transform: const GradientRotation(-math.pi / 2),
-        ).createShader(rect);
+      final progressPaint =
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = strokeWidth
+            ..strokeCap = StrokeCap.round
+            ..shader = SweepGradient(
+              startAngle: -math.pi / 2,
+              endAngle: 3 * math.pi / 2,
+              colors: [startColor, endColor],
+              transform: const GradientRotation(-math.pi / 2),
+            ).createShader(rect);
 
       // Ambient glow (slightly wider, blurred, low alpha)
-      final glowPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth + 4
-        ..strokeCap = StrokeCap.round
-        ..color = endColor.withValues(alpha: glowAlpha)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      final glowPaint =
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = strokeWidth + 4
+            ..strokeCap = StrokeCap.round
+            ..color = endColor.withValues(alpha: glowAlpha)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
 
       const startAngle = -math.pi / 2;
       final sweepAngle = 2 * math.pi * progress;

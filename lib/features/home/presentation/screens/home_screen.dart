@@ -125,7 +125,8 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with TickerProviderStateMixin {
   // 0 → 0.64, one-shot
   late final AnimationController _progressController;
   late final Animation<double> _progressAnimation;
@@ -146,13 +147,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
-    _progressAnimation = Tween<double>(begin: 0.0, end: _progressTarget)
-        .animate(
-          CurvedAnimation(
-            parent: _progressController,
-            curve: Curves.easeOutCubic,
-          ),
-        );
+    _progressAnimation = Tween<double>(
+      begin: 0.0,
+      end: _progressTarget,
+    ).animate(
+      CurvedAnimation(parent: _progressController, curve: Curves.easeOutCubic),
+    );
     _progressController.forward();
 
     _glowController = AnimationController(
@@ -596,13 +596,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
     final bestAsync = ref.watch(bestRecordStreamProvider);
     final bestRecord = bestAsync.valueOrNull;
 
-    final scoreStr = bestRecord != null
-        ? _formatScore(bestRecord.score)
-        : '12,480';
+    final scoreStr =
+        bestRecord != null ? _formatScore(bestRecord.score) : '12,480';
     final comboStr = bestRecord != null ? 'x${bestRecord.bestCombo}' : 'x8';
-    final accuracyStr = bestRecord != null
-        ? '${(bestRecord.accuracy * 100).toInt()}%'
-        : '74%';
+    final accuracyStr =
+        bestRecord != null ? '${(bestRecord.accuracy * 100).toInt()}%' : '74%';
 
     return Row(
       children: [

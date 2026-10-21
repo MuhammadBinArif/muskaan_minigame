@@ -117,7 +117,7 @@ class ChallengeDetailScreen extends StatefulWidget {
     this.title = 'Gol Gappa Tsunami',
     this.description =
         'Catch 100 gol gappas in one session without missing 3 in a row. '
-        'Show your true mastery!',
+            'Show your true mastery!',
     this.caught = 68,
     this.target = 100,
     this.rewardPoints = 750,
