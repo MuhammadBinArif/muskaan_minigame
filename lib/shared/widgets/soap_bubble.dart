@@ -66,14 +66,16 @@ class SoapBubblesPainter extends CustomPainter {
   final Color highlightColor;
   final double strokeWidth;
 
-  static final Paint _fillPaint = Paint()
-    ..isAntiAlias = true
-    ..style = PaintingStyle.fill;
+  static final Paint _fillPaint =
+      Paint()
+        ..isAntiAlias = true
+        ..style = PaintingStyle.fill;
 
-  static final Paint _strokePaint = Paint()
-    ..isAntiAlias = true
-    ..style = PaintingStyle.stroke
-    ..strokeCap = StrokeCap.round;
+  static final Paint _strokePaint =
+      Paint()
+        ..isAntiAlias = true
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
 
   /// Normalized coordinates inside a 0..1 box.
   /// This lets us scale with canvas.transform without recalculating paths.

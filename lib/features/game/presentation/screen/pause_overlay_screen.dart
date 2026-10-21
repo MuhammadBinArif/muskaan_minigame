@@ -412,9 +412,8 @@ class _ToggleButton extends StatelessWidget {
               color: isOn ? AppColors.toggleOnBg : AppColors.toggleOffBg,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: isOn
-                    ? AppColors.toggleOnBorder
-                    : AppColors.toggleOffBorder,
+                color:
+                    isOn ? AppColors.toggleOnBorder : AppColors.toggleOffBorder,
                 width: 1,
               ),
             ),

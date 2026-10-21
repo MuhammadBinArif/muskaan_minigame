@@ -1,17 +1,7 @@
-# muskaan_minigame
+# Muskaan Minigame
 
-A new Flutter project.
+A Flutter Android game controlled by on-device face and mouth tracking. The game includes calibration, scoring, results, replay, local session records, and an optional Android AdMob integration.
 
-## Getting Started
+Run `flutter pub get`, then `flutter analyze`, `flutter test`, and `flutter build apk --debug` with a configured Flutter/Android SDK. Debug builds use Google's official sample ad identifiers; do not test live ads. Camera behavior requires a physical Android device.
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The app is **not yet ready for a production Play release**. See the [Phase 6 release-readiness handoff](docs/phase-6-release-readiness.md) for the signing and AdMob requirements, store checklist, outstanding defects, and controlled build procedure. No keystore or production ad IDs are included in this repository.

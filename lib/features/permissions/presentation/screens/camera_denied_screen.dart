@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 
 // ==========================================
 // THEME TOKENS

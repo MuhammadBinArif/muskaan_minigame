@@ -448,14 +448,20 @@ class _ChallengesScreenState extends State<ChallengesScreen>
           decoration: BoxDecoration(
             color: goal.done ? AppColors.doneBg : AppColors.cardBg,
             borderRadius: BorderRadius.circular(12),
-            border: goal.done
-                ? Border.all(color: AppColors.doneBorder, width: 1)
-                : null,
+            border:
+                goal.done
+                    ? Border.all(color: AppColors.doneBorder, width: 1)
+                    : null,
             boxShadow: [
               BoxShadow(
-                color: goal.done
-                    ? AppColors.accentGreen.withValues(alpha: 0.08 + 0.10 * p)
-                    : AppColors.accentOrange.withValues(alpha: 0.06 + 0.10 * p),
+                color:
+                    goal.done
+                        ? AppColors.accentGreen.withValues(
+                          alpha: 0.08 + 0.10 * p,
+                        )
+                        : AppColors.accentOrange.withValues(
+                          alpha: 0.06 + 0.10 * p,
+                        ),
                 blurRadius: 6 + 6 * p,
                 spreadRadius: 0.5,
               ),
@@ -481,9 +487,10 @@ class _ChallengesScreenState extends State<ChallengesScreen>
             color: goal.done ? AppColors.doneIconBg : AppColors.iconBgOrange,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: goal.done
-                  ? AppColors.doneIconBorder
-                  : AppColors.iconBorderOrange,
+              color:
+                  goal.done
+                      ? AppColors.doneIconBorder
+                      : AppColors.iconBorderOrange,
             ),
           ),
           child: Text(
@@ -503,9 +510,10 @@ class _ChallengesScreenState extends State<ChallengesScreen>
                   Expanded(
                     child: Text(
                       goal.title,
-                      style: goal.done
-                          ? AppTypography.goalTitleDone
-                          : AppTypography.goalTitle,
+                      style:
+                          goal.done
+                              ? AppTypography.goalTitleDone
+                              : AppTypography.goalTitle,
                     ),
                   ),
                   Text('+${goal.reward}', style: AppTypography.goalReward),
@@ -555,11 +563,12 @@ class _ChallengesScreenState extends State<ChallengesScreen>
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: entry.isSelf ? AppColors.selfHighlight : Colors.transparent,
-        border: isLast
-            ? null
-            : const Border(
-                bottom: BorderSide(color: AppColors.cardDivider, width: 1),
-              ),
+        border:
+            isLast
+                ? null
+                : const Border(
+                  bottom: BorderSide(color: AppColors.cardDivider, width: 1),
+                ),
       ),
       child: Row(
         children: [
@@ -574,9 +583,10 @@ class _ChallengesScreenState extends State<ChallengesScreen>
           Expanded(
             child: Text(
               entry.name,
-              style: entry.isSelf
-                  ? AppTypography.leaderNameSelf
-                  : AppTypography.leaderName,
+              style:
+                  entry.isSelf
+                      ? AppTypography.leaderNameSelf
+                      : AppTypography.leaderName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

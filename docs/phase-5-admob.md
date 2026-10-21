@@ -8,6 +8,8 @@ The results screen offers Play Again only after result saving completes. Every t
 
 ## Production release work
 
+The Phase 6 release guard and current handoff checklist are in [phase-6-release-readiness.md](phase-6-release-readiness.md). The instructions below describe the earlier Phase 5 baseline; use Phase 6 for release builds.
+
 1. Create the Android app and interstitial/rewarded units in AdMob. Supply the real Android app ID to Gradle as `-PadmobAppId=ca-app-pub-...~...`. Supply real unit IDs to Flutter as `--dart-define=ADMOB_INTERSTITIAL_ID=ca-app-pub-.../...` and `--dart-define=ADMOB_REWARDED_ID=ca-app-pub-.../...`. The debug build always uses Google test IDs, regardless of these values. A release build without a real app ID fails; missing production unit IDs disable ad requests.
 2. Configure UMP messages and privacy options in AdMob for applicable regions. Confirm the intended audience and age treatment before enabling live ads. This repository does not define those policy decisions. Validate consent states and privacy-option visibility on a physical Android device, including background/foreground behavior.
 3. Publish a privacy policy describing Google Mobile Ads data collection and update Play Console Data safety and advertising declarations. Verify applicable legal requirements with the app owner; the SDK integration alone does not establish compliance.
