@@ -77,9 +77,7 @@ android {
             // Set with -PadmobAppId=ca-app-pub-...~... for a production build.
             manifestPlaceholders["admobAppId"] = productionId ?: "MISSING_PRODUCTION_ADMOB_APP_ID"
 
-            // R8 shrinking, optimization, and obfuscation
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Preserve the native SDK rules already on main.
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
