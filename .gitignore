@@ -13,6 +13,19 @@ doc/api/
 # dotenv environment variables file
 .env*
 
+# Private release material, at any repository location.
+*.jks
+*.keystore
+*.p12
+*.p8
+*.mobileprovision
+key.properties
+*.symbols
+*.dSYM/
+.release-symbols/
+security-artifacts/
+__pycache__/
+
 # Avoid committing generated Javascript files:
 *.dart.js
 *.info.json      # Produced by the --dump-info flag.

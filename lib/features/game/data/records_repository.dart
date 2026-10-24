@@ -34,7 +34,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
     try {
       await _database.upsertSession(record);
     } catch (e, st) {
-      throw GameRepositoryException('Failed to save game session: $e', e, st);
+      throw GameRepositoryException('Failed to save game session.', e, st);
     }
   }
 
@@ -44,7 +44,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
       final records = await _database.getCompletedSessions();
       return records.map(_toDomainRecord).toList();
     } catch (e, st) {
-      throw GameRepositoryException('Failed to get sessions: $e', e, st);
+      throw GameRepositoryException('Failed to get sessions.', e, st);
     }
   }
 
@@ -54,7 +54,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
       final record = await _database.getBestSession();
       return record == null ? null : _toDomainRecord(record);
     } catch (e, st) {
-      throw GameRepositoryException('Failed to get best session: $e', e, st);
+      throw GameRepositoryException('Failed to get best session.', e, st);
     }
   }
 
@@ -64,7 +64,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
       final record = await _database.getSessionById(sessionId);
       return record == null ? null : _toDomainRecord(record);
     } catch (e, st) {
-      throw GameRepositoryException('Failed to get session by ID: $e', e, st);
+      throw GameRepositoryException('Failed to get session by ID.', e, st);
     }
   }
 
@@ -74,7 +74,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
       await _database.updateSession(record);
     } catch (e, st) {
       throw GameRepositoryException(
-        'Failed to update session completion: $e',
+        'Failed to update session completion.',
         e,
         st,
       );
@@ -86,7 +86,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
     try {
       await _database.clearAllSessions();
     } catch (e, st) {
-      throw GameRepositoryException('Failed to clear sessions: $e', e, st);
+      throw GameRepositoryException('Failed to clear sessions.', e, st);
     }
   }
 
@@ -97,7 +97,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
       return all.where((s) => s.startedAt.isAfter(date)).toList();
     } catch (e, st) {
       throw GameRepositoryException(
-        'Failed to get sessions since date: $e',
+        'Failed to get sessions since date.',
         e,
         st,
       );
@@ -106,18 +106,21 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
 
   @override
   Stream<List<GameSessionRecord>> watchAllSessions() {
-    try {
-      return _database.getAllSessionsStream().map(
-        (records) => records.map(_toDomainRecord).toList(),
-      );
-    } catch (e, st) {
-      throw GameRepositoryException('Failed to watch sessions: $e', e, st);
-    }
+    return _database
+        .getAllSessionsStream()
+        .map((records) => records.map(_toDomainRecord).toList())
+        .handleError((Object error, StackTrace stack) {
+          throw GameRepositoryException(
+            'Unable to load game history.',
+            error,
+            stack,
+          );
+        });
   }
 
   // ── Private ────────────────────────────────────────────────
   GameSessionRecord _toDomainRecord(GameRecord row) {
-    return GameSessionRecord(
+    final record = GameSessionRecord(
       id: row.id,
       score: row.score,
       livesLost: row.livesLost,
@@ -132,11 +135,13 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
       state: _stateFromInt(row.state),
       isNewBest: row.isNewBest,
     );
+    record.validate();
+    return record;
   }
 
   GameSessionState _stateFromInt(int raw) {
     if (raw < 0 || raw >= SessionState.values.length) {
-      return GameSessionState.results;
+      throw const FormatException('Invalid game session state.');
     }
     return SessionState.values[raw].toDomain();
   }

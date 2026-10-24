@@ -28,12 +28,15 @@ class AdConfig {
   static String get interstitialId => _selected.interstitial;
   static String get rewardedId => _selected.rewarded;
 
+  /// Syntax and sample-publisher rejection, not verification of account ownership.
+  static bool isProductionUnitId(String value) =>
+      RegExp(r'^ca-app-pub-\d{16}/\d{10}$').hasMatch(value) &&
+      !value.startsWith('ca-app-pub-3940256099942544/');
+
   static bool get enabled =>
       !kIsWeb &&
       defaultTargetPlatform == TargetPlatform.android &&
       (!kReleaseMode ||
-          (productionInterstitial.isNotEmpty &&
-              productionRewarded.isNotEmpty &&
-              productionInterstitial != _testInterstitial &&
-              productionRewarded != _testRewarded));
+          (isProductionUnitId(productionInterstitial) &&
+              isProductionUnitId(productionRewarded)));
 }

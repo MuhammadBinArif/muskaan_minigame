@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show ValueChanged;
 
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/domain/face_game_control.dart';
+import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 typedef ControlFrameCallback =
     void Function(bool isOpen, bool isActionable, double targetX);
@@ -34,6 +35,25 @@ class MuskaanFlameGame extends FlameGame {
   CollisionEvent? _feedbackEvent;
   int? _lastFeedbackTimestamp;
   double _feedbackAge = 0;
+  final Map<bool, Picture> _foodPictures = {};
+
+  Picture _foodPicture(bool pani) => _foodPictures.putIfAbsent(pani, () {
+    final recorder = PictureRecorder();
+    FoodPainter(
+      pani: pani,
+      showShadow: false,
+    ).paint(Canvas(recorder), const Size.square(128));
+    return recorder.endRecording();
+  });
+
+  @override
+  void onRemove() {
+    for (final picture in _foodPictures.values) {
+      picture.dispose();
+    }
+    _foodPictures.clear();
+    super.onRemove();
+  }
 
   static const double targetY = 0.52;
 
@@ -158,16 +178,13 @@ class MuskaanFlameGame extends FlameGame {
       canvas.restore();
       return;
     }
-    final color =
-        food.type == FoodItemType.gold
-            ? const Color(0xFFFFD86B)
-            : const Color(0xFF3FB39A);
-    canvas.drawCircle(Offset.zero, radius, Paint()..color = color);
-    canvas.drawCircle(
-      Offset(-radius * 0.25, -radius * 0.3),
-      radius * 0.28,
-      Paint()..color = const Color(0x66FFFFFF),
-    );
+    // Fit the shell to the existing food radius; collision geometry stays in
+    // the domain layer. Cache vector commands rather than rebuilding paths
+    // and texture for every falling item on every frame.
+    final scale = radius / (128 * .36 * 1.07);
+    canvas.scale(scale);
+    canvas.translate(-64, -128 * .53);
+    canvas.drawPicture(_foodPicture(food.type == FoodItemType.teal));
     canvas.restore();
   }
 

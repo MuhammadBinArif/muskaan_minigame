@@ -1,9 +1,12 @@
+import 'dart:ui' as ui;
+import 'package:flame/game.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/domain/face_game_control.dart';
 import 'package:muskaan_minigame/features/game/presentation/flame/muskaan_flame_game.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   MuskaanFlameGame createGame() => MuskaanFlameGame(
     controlConfig: const FaceGameControlConfig(
       neutralX: .5,
@@ -19,6 +22,42 @@ void main() {
     mouthY: .52,
     timestamp: 10,
     isCatch: true,
+  );
+
+  test(
+    'game renders supplied food artwork and releases its drawing cache',
+    () async {
+      final game = createGame();
+      game.onGameResize(Vector2(400, 800));
+      game.syncSession(
+        foods: [
+          for (final type in FoodItemType.values)
+            FoodItem(
+              type: type,
+              positionX: .25 + type.index * .25,
+              positionY: .2,
+              velocityX: 0,
+              velocityY: 0,
+              size: .1,
+              creationTime: 1,
+            ),
+        ],
+        recentCollisions: const [],
+        isPlaying: false,
+      );
+      for (var i = 0; i < 2; i++) {
+        final recorder = ui.PictureRecorder();
+        game.render(ui.Canvas(recorder));
+        final picture = recorder.endRecording();
+        final image = await picture.toImage(400, 250);
+        final bytes = await image.toByteData();
+        expect(bytes!.buffer.asUint8List().any((b) => b != 0), isTrue);
+        image.dispose();
+        picture.dispose();
+        game.onRemove();
+      }
+      game.avatar.dispose();
+    },
   );
 
   test(

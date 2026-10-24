@@ -44,6 +44,28 @@ class GameSessionRecord {
     required this.isNewBest,
   });
 
+  /// Check persisted values without treating local scores as authoritative.
+  /// Reject corruption rather than silently converting it to valid game data.
+  void validate() {
+    if (id < 0 ||
+        score < 0 ||
+        maxLives <= 0 ||
+        livesLost < 0 ||
+        livesLost > maxLives ||
+        timePlayed < 0 ||
+        bestCombo < 0 ||
+        catches < 0 ||
+        bestCombo > catches ||
+        !accuracy.isFinite ||
+        accuracy < 0 ||
+        accuracy > 1 ||
+        smileScore < 0 ||
+        smileScore > 100 ||
+        (endedAt != null && endedAt!.isBefore(startedAt))) {
+      throw const FormatException('Invalid game session record.');
+    }
+  }
+
   /// Create a brand-new, unpersisted session record.
   ///
   /// Allocate a stable SQLite-safe key once, before gameplay begins.

@@ -155,7 +155,7 @@ class FaceDetectionController extends StateNotifier<FaceDetectionState> {
       if (!_isStale(generation)) {
         state = state.copyWith(
           status: FaceDetectionStatus.error,
-          error: 'Unable to start face detection: $error',
+          error: 'Unable to start face detection. Please try again.',
         );
       }
     } finally {
@@ -183,7 +183,7 @@ class FaceDetectionController extends StateNotifier<FaceDetectionState> {
       if (!_isStale(generation)) {
         state = state.copyWith(
           status: FaceDetectionStatus.error,
-          error: 'Face detection failed: $error',
+          error: 'Face detection failed. Please try again.',
         );
       }
     } finally {

@@ -178,7 +178,8 @@ class CameraServiceImpl implements CameraService {
           _emit(
             CameraState(
               status: CameraStatus.failed,
-              errorMessage: 'Camera initialization failed: $error',
+              errorMessage:
+                  'Unable to initialize the camera. Please try again.',
             ),
           );
         }
@@ -229,7 +230,8 @@ class CameraServiceImpl implements CameraService {
                   _emit(
                     CameraState(
                       status: CameraStatus.failed,
-                      errorMessage: 'Camera frame processing failed: $error',
+                      errorMessage:
+                          'Unable to process the camera frame. Please try again.',
                     ),
                   );
                 }
@@ -246,7 +248,8 @@ class CameraServiceImpl implements CameraService {
         _emit(
           CameraState(
             status: CameraStatus.failed,
-            errorMessage: 'Camera streaming failed: $error',
+            errorMessage:
+                'Unable to start the camera stream. Please try again.',
           ),
         );
       }
@@ -293,7 +296,8 @@ class CameraServiceImpl implements CameraService {
         _emit(
           CameraState(
             status: CameraStatus.failed,
-            errorMessage: 'Could not release camera: $error',
+            errorMessage:
+                'Unable to release the camera. Please reopen the app.',
           ),
         );
       }

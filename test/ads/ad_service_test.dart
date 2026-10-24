@@ -48,6 +48,21 @@ void main() {
     );
   });
 
+  test(
+    'release rejects malformed IDs and every Google sample publisher unit',
+    () {
+      for (final id in [
+        '',
+        'production-interstitial',
+        'ca-app-pub-3940256099942544/1033173712',
+        'ca-app-pub-3940256099942544/5224354917',
+        'ca-app-pub-3940256099942544/4411468910',
+      ]) {
+        expect(AdConfig.isProductionUnitId(id), isFalse);
+      }
+    },
+  );
+
   test('repeated reward or dismissal callbacks run the action once', () {
     final action = OneShotAction();
     var count = 0;

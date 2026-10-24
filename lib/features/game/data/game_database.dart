@@ -184,6 +184,7 @@ extension SessionStateDomainX on SessionState {
 // ============================================================
 extension GameSessionRecordMapper on GameSessionRecord {
   GameRecordsCompanion toCompanion() {
+    validate();
     return GameRecordsCompanion(
       // 0 = "not yet persisted" → let Drift assign the auto-increment id.
       id: id == 0 ? const Value.absent() : Value(id),
