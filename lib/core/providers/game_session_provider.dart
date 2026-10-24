@@ -279,7 +279,10 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
       }
     } catch (error) {
       if (mounted && state.completedRecord?.id == record.id) {
-        state = state.copyWith(isSaving: false, saveError: error.toString());
+        state = state.copyWith(
+          isSaving: false,
+          saveError: 'Unable to save this round. Please try again.',
+        );
       }
     } finally {
       _saveInFlight = null;

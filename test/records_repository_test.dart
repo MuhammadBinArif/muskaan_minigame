@@ -30,6 +30,58 @@ void main() {
   });
 
   group('GameRecordsRepository & Database tests', () {
+    test('invalid writes are rejected without leaking record values', () async {
+      final bad = GameSessionRecord.create().complete(
+        finalScore: -500,
+        finalLivesLost: 0,
+        timePlayed: 30,
+        finalBestCombo: 0,
+        finalCatches: 0,
+        finalAccuracy: double.infinity,
+        finalSmileScore: 0,
+      );
+      await expectLater(
+        repo.saveSession(bad),
+        throwsA(isA<GameRepositoryException>()),
+      );
+      expect(await repo.getAllSessions(), isEmpty);
+    });
+
+    test('corrupt stored rows fail safely in reads and streams', () async {
+      final record = GameSessionRecord.create().complete(
+        finalScore: 100,
+        finalLivesLost: 0,
+        timePlayed: 30,
+        finalBestCombo: 1,
+        finalCatches: 1,
+        finalAccuracy: 1,
+        finalSmileScore: 20,
+      );
+      await repo.saveSession(record);
+      await db.customStatement('UPDATE game_records SET accuracy = 2');
+      final safeError = isA<GameRepositoryException>().having(
+        (e) => e.toString(),
+        'public message',
+        isNot(contains('accuracy')),
+      );
+      await expectLater(repo.getAllSessions(), throwsA(safeError));
+      await expectLater(repo.watchAllSessions().first, throwsA(safeError));
+      await db.customStatement('UPDATE game_records SET state = 999');
+      await expectLater(repo.getSessionById(record.id), throwsA(safeError));
+      await repo.clearAllSessions();
+      expect(await repo.getAllSessions(), isEmpty);
+    });
+
+    test('internal exception details are retained but not displayed', () {
+      final error = StateError('PRIVATE_SENTINEL');
+      final exception = GameRepositoryException(
+        'Unable to load history.',
+        error,
+        StackTrace.current,
+      );
+      expect(exception.error, same(error));
+      expect(exception.toString(), isNot(contains('PRIVATE_SENTINEL')));
+    });
     test('saveSession persists a completed session and retrieves it', () async {
       final initialSessions = await repo.getAllSessions();
       expect(initialSessions, isEmpty);

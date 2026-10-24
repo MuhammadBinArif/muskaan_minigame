@@ -65,6 +65,7 @@ class AdService with WidgetsBindingObserver {
   bool _sdkReady = false;
   bool _initialized = false;
   bool _replayPending = false;
+  bool _privacyOptionsPending = false;
   bool privacyOptionsRequired = false;
   int _interstitialGeneration = 0;
   int _rewardedGeneration = 0;
@@ -105,22 +106,30 @@ class AdService with WidgetsBindingObserver {
   }
 
   Future<bool> showPrivacyOptions() async {
-    if (!privacyOptionsRequired || _disposed) return false;
+    if (!privacyOptionsRequired || _disposed || _privacyOptionsPending) {
+      return false;
+    }
+    _privacyOptionsPending = true;
+    // Previously loaded ads may reflect a different consent decision even
+    // when UMP still permits some advertising after the form is closed.
+    _canRequestAds = false;
+    _interstitialGeneration++;
+    _rewardedGeneration++;
+    _interstitialRetry?.cancel();
+    _rewardedRetry?.cancel();
+    _interstitial?.dispose();
+    _rewarded?.dispose();
+    _interstitial = null;
+    _rewarded = null;
+    interstitialState = AdLoadState.idle;
+    rewardedState = AdLoadState.idle;
     try {
       FormError? formError;
       await ConsentForm.showPrivacyOptionsForm((error) => formError = error);
       if (_disposed || formError != null) return false;
       _canRequestAds = await ConsentInformation.instance.canRequestAds();
-      if (!_canRequestAds) {
-        _interstitialGeneration++;
-        _rewardedGeneration++;
-        _interstitial?.dispose();
-        _rewarded?.dispose();
-        _interstitial = null;
-        _rewarded = null;
-        interstitialState = AdLoadState.idle;
-        rewardedState = AdLoadState.idle;
-      } else if (!_sdkReady) {
+      if (!_canRequestAds) return true;
+      if (!_sdkReady) {
         await MobileAds.instance.initialize();
         if (_disposed) return false;
         _sdkReady = true;
@@ -134,6 +143,8 @@ class AdService with WidgetsBindingObserver {
     } catch (_) {
       // Keep the game usable if UMP cannot reopen its privacy form.
       return false;
+    } finally {
+      _privacyOptionsPending = false;
     }
   }
 

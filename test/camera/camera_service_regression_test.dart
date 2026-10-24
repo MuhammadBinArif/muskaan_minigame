@@ -90,6 +90,8 @@ void main() {
       addTearDown(service.close);
       await service.initialize();
       expect(service.state.status, CameraStatus.failed);
+      expect(service.state.errorMessage, isNot(contains('sensor unavailable')));
+      expect(service.state.errorMessage, contains('Please try again'));
       expect(first.disposed, isTrue);
       await service.initialize();
       expect(service.state.status, CameraStatus.ready);

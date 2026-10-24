@@ -163,7 +163,11 @@ void main() {
     await camera.send(FakeCameraImage());
 
     expect(controller.state.status, FaceDetectionStatus.error);
-    expect(controller.state.error, contains('native detector unavailable'));
+    expect(controller.state.error, 'Face detection failed. Please try again.');
+    expect(
+      controller.state.error,
+      isNot(contains('native detector unavailable')),
+    );
   });
 
   test(

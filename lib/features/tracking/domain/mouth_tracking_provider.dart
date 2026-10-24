@@ -268,7 +268,10 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
         }
       } catch (error) {
         if (mounted && generation == _generation) {
-          state = state.copyWith(error: error.toString(), isStreaming: false);
+          state = state.copyWith(
+            error: 'Unable to track mouth movement. Please recalibrate.',
+            isStreaming: false,
+          );
         }
       }
     });
