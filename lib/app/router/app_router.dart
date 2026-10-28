@@ -48,6 +48,7 @@ import 'package:muskaan_minigame/features/smile/presentation/screens/smile_spotl
 import 'package:muskaan_minigame/features/challenges/presentation/screens/challenges_screen.dart';
 import 'package:muskaan_minigame/features/challenges/presentation/screens/challenge_detail_screen.dart';
 import 'package:muskaan_minigame/features/profile/presentation/screens/profile_screen.dart';
+import 'package:muskaan_minigame/features/profile/presentation/screens/avatar_studio_screen.dart';
 import 'package:muskaan_minigame/features/settings/presentation/screens/settings_screen.dart';
 
 // ============================================================
@@ -154,6 +155,10 @@ GoRouter createRouter({String initialLocation = '/'}) {
       // ───── Bottom-nav destinations ─────
       GoRoute(path: '/games', builder: (_, _) => const GameplayScreen()),
       GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen()),
+      GoRoute(
+        path: '/avatar-studio',
+        builder: (_, _) => const AvatarStudioScreen(),
+      ),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
     ],
   );

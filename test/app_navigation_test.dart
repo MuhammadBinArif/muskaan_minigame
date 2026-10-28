@@ -1227,6 +1227,17 @@ void main() {
       expect(find.text('My Profile'), findsOneWidget);
     });
 
+    testWidgets('avatar studio button opens Avatar Studio', (tester) async {
+      await pumpApp(tester, '/profile');
+
+      await tester.tap(find.byKey(const Key('open-avatar-studio')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Avatar Studio'), findsOneWidget);
+      expect(find.text('SAVE MY AVATAR'), findsOneWidget);
+    });
+
     testWidgets('bottom nav — profile tab highlighted', (tester) async {
       await pumpApp(tester, '/profile');
       expect(find.text('My Profile'), findsOneWidget);
@@ -1275,6 +1286,80 @@ void main() {
         const Rect.fromLTWH(18, 376, 288, 211),
       );
       expectRect('camera-privacy-note', const Rect.fromLTWH(18, 599, 288, 18));
+    });
+  });
+
+  group('Avatar Studio Screen', () {
+    testWidgets('renders editor controls and selects hair options', (
+      tester,
+    ) async {
+      await pumpApp(tester, '/avatar-studio');
+
+      expect(find.text('Avatar Studio'), findsOneWidget);
+      expect(find.text('Create your market look'), findsOneWidget);
+      expect(find.text('Reset'), findsOneWidget);
+      expect(find.text('Live preview'), findsOneWidget);
+      expect(find.text('Face'), findsOneWidget);
+      expect(find.text('Hair'), findsOneWidget);
+      expect(find.text('Style'), findsOneWidget);
+      expect(find.text('Extras'), findsOneWidget);
+      expect(find.text('SAVE MY AVATAR'), findsOneWidget);
+
+      expect(find.byKey(const Key('avatar-option-0-selected')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('avatar-option-2')));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byKey(const Key('avatar-option-2-selected')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('avatar-studio-reset')));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byKey(const Key('avatar-option-0-selected')), findsOneWidget);
+    });
+
+    testWidgets('matches the 314x688 reference geometry', (tester) async {
+      await pumpApp(
+        tester,
+        '/avatar-studio',
+        logicalSize: const Size(314, 688),
+      );
+
+      void expectRect(String key, Rect expected) {
+        final rect = tester.getRect(find.byKey(Key(key)));
+        expect(rect.left, closeTo(expected.left, 0.01));
+        expect(rect.top, closeTo(expected.top, 0.01));
+        expect(rect.width, closeTo(expected.width, 0.01));
+        expect(rect.height, closeTo(expected.height, 0.01));
+      }
+
+      expectRect('avatar-studio-panel', const Rect.fromLTWH(0, 0, 314, 688));
+      expectRect('avatar-studio-header', const Rect.fromLTWH(14, 39, 288, 44));
+      expectRect('avatar-preview-halo', const Rect.fromLTWH(69, 184, 176, 176));
+      expectRect('avatar-preview', const Rect.fromLTWH(93, 208, 128, 128));
+      expectRect('live-preview-pill', const Rect.fromLTWH(117, 423, 80, 24));
+      expectRect('avatar-editor-sheet', const Rect.fromLTWH(0, 456, 314, 232));
+      expectRect('avatar-category-tabs', const Rect.fromLTWH(14, 468, 288, 43));
+      expectRect('avatar-hair-options', const Rect.fromLTWH(14, 529, 288, 58));
+      expectRect('save-avatar-button', const Rect.fromLTWH(14, 602, 288, 48));
+    });
+
+    testWidgets('save returns to Profile when opened from Profile', (
+      tester,
+    ) async {
+      await pumpApp(tester, '/profile');
+      await tester.tap(find.byKey(const Key('open-avatar-studio')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byKey(const Key('avatar-option-2')));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byKey(const Key('save-avatar-button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('My Profile'), findsOneWidget);
+      expect(
+        find.byKey(const Key('profile-selected-avatar-2')),
+        findsOneWidget,
+      );
     });
   });
 

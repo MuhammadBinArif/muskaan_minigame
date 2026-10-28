@@ -215,10 +215,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ),
       child: Row(
         children: [
-          _AvatarPortrait(
-            symbol: _avatarOptions[_selectedAvatar],
-            size: 64,
-            selected: true,
+          KeyedSubtree(
+            key: Key('profile-selected-avatar-$_selectedAvatar'),
+            child: _AvatarPortrait(
+              symbol: _avatarOptions[_selectedAvatar],
+              size: 64,
+              selected: true,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -442,35 +445,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           const SizedBox(height: 11),
           Expanded(
-            child: Semantics(
-              button: true,
-              label: 'Open avatar studio',
-              child: Container(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
                 key: const Key('open-avatar-studio'),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _ProfileColors.orange),
-                ),
-                alignment: Alignment.center,
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.edit_outlined,
-                      color: _ProfileColors.orange,
-                      size: 17,
-                    ),
-                    SizedBox(width: 9),
-                    Text(
-                      'OPEN AVATAR STUDIO',
-                      style: TextStyle(
+                onTap: () async {
+                  final selected = await context.push<int>('/avatar-studio');
+                  if (mounted && selected != null) {
+                    setState(() => _selectedAvatar = selected.clamp(0, 3));
+                  }
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _ProfileColors.orange),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.edit_outlined,
                         color: _ProfileColors.orange,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: .25,
+                        size: 17,
                       ),
-                    ),
-                  ],
+                      SizedBox(width: 9),
+                      Text(
+                        'OPEN AVATAR STUDIO',
+                        style: TextStyle(
+                          color: _ProfileColors.orange,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: .25,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
