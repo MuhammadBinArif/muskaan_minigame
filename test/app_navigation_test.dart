@@ -123,12 +123,15 @@ void main() {
     testWidgets('Step 1 → Step 2 → Step 3 → Camera Permission', (tester) async {
       await pumpApp(tester, '/how-to-play/step1');
       expect(find.text('Position Your Face'), findsOneWidget);
+      expect(find.byKey(const Key('onboarding-selfie-emoji')), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('NEXT'));
       expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
+      expect(find.byKey(const Key('onboarding-selfie-emoji')), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('NEXT'));
       expect(find.text('Build Combos, Avoid Hazards'), findsOneWidget);
+      expect(find.byKey(const Key('onboarding-selfie-emoji')), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('START CAMERA SETUP'));
       expect(find.text('Camera Access'), findsOneWidget);
