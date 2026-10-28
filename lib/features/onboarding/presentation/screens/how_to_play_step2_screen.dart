@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
-import 'package:muskaan_minigame/shared/widgets/selfie_emoji_illustration.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -178,7 +177,16 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
                   ),
                 ),
               ),
-              const SelfieEmojiIllustration(),
+              Semantics(
+                label: 'Face with open mouth',
+                child: const ExcludeSemantics(
+                  child: Text(
+                    '😮',
+                    key: Key('onboarding-open-mouth-emoji'),
+                    style: TextStyle(fontSize: 92, height: 1),
+                  ),
+                ),
+              ),
               Positioned(
                 top: 34,
                 right: 24,

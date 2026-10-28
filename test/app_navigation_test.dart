@@ -127,11 +127,14 @@ void main() {
 
       await tapAndAdvance(tester, find.text('NEXT'));
       expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
-      expect(find.byKey(const Key('onboarding-selfie-emoji')), findsOneWidget);
+      expect(
+        find.byKey(const Key('onboarding-open-mouth-emoji')),
+        findsOneWidget,
+      );
 
       await tapAndAdvance(tester, find.text('NEXT'));
       expect(find.text('Build Combos, Avoid Hazards'), findsOneWidget);
-      expect(find.byKey(const Key('onboarding-selfie-emoji')), findsOneWidget);
+      expect(find.byKey(const Key('onboarding-bolt-icon')), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('START CAMERA SETUP'));
       expect(find.text('Camera Access'), findsOneWidget);

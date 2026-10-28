@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:muskaan_minigame/shared/widgets/selfie_emoji_illustration.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -174,7 +173,13 @@ class _HowToPlayStep3ScreenState extends State<HowToPlayStep3Screen>
                   ),
                 ),
               ),
-              const SelfieEmojiIllustration(),
+              const Icon(
+                Icons.bolt,
+                key: Key('onboarding-bolt-icon'),
+                size: 96,
+                color: AppColors.accentGold,
+                semanticLabel: 'Lightning bolt',
+              ),
               Positioned(
                 top: 34,
                 right: 24,
