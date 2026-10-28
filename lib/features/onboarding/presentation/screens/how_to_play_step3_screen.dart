@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muskaan_minigame/shared/widgets/selfie_emoji_illustration.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -112,7 +113,7 @@ class _HowToPlayStep3ScreenState extends State<HowToPlayStep3Screen>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const SizedBox(height: 24),
-                        _buildIllustration('⚡'),
+                        _buildIllustration(),
                         const SizedBox(height: 32),
                         const Text(
                           'Build Combos, Avoid Hazards',
@@ -146,7 +147,7 @@ class _HowToPlayStep3ScreenState extends State<HowToPlayStep3Screen>
     );
   }
 
-  Widget _buildIllustration(String emoji) {
+  Widget _buildIllustration() {
     return SizedBox(
       width: 220,
       height: 220,
@@ -173,7 +174,7 @@ class _HowToPlayStep3ScreenState extends State<HowToPlayStep3Screen>
                   ),
                 ),
               ),
-              Text(emoji, style: const TextStyle(fontSize: 76)),
+              const SelfieEmojiIllustration(),
               Positioned(
                 top: 34,
                 right: 24,

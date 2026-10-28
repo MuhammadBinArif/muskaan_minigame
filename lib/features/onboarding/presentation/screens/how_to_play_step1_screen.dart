@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
+import 'package:muskaan_minigame/shared/widgets/selfie_emoji_illustration.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -177,8 +177,7 @@ class _HowToPlayStep1ScreenState extends State<HowToPlayStep1Screen>
                   ),
                 ),
               ),
-              // Central emoji icon
-              const FacePhoneIllustration(size: 150),
+              const SelfieEmojiIllustration(),
               // Floating yellow dot (top-right)
               Positioned(
                 top: 34,

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
+import 'package:muskaan_minigame/shared/widgets/selfie_emoji_illustration.dart';
 
 // ==========================================
 // THEME TOKENS
@@ -177,15 +178,7 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
                   ),
                 ),
               ),
-              const Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  GolgappaIcon(size: 74),
-                  SizedBox(width: 16),
-                  GolgappaIcon(size: 64, pani: true),
-                ],
-              ),
+              const SelfieEmojiIllustration(),
               Positioned(
                 top: 34,
                 right: 24,
