@@ -38,6 +38,7 @@ class MouthTrackingState {
   final String? error;
   final double fps;
   final double rawOpenness;
+  final double? smileProbability;
   final DateTime? lastEventTime;
 
   const MouthTrackingState({
@@ -52,6 +53,7 @@ class MouthTrackingState {
     this.error,
     this.fps = 0.0,
     this.rawOpenness = 0.0,
+    this.smileProbability,
     this.lastEventTime,
   });
 
@@ -91,6 +93,8 @@ class MouthTrackingState {
     bool clearError = false,
     double? fps,
     double? rawOpenness,
+    double? smileProbability,
+    bool clearSmileProbability = false,
     DateTime? lastEventTime,
   }) => MouthTrackingState(
     latestResult: latestResult ?? this.latestResult,
@@ -105,6 +109,10 @@ class MouthTrackingState {
     error: clearError ? null : error ?? this.error,
     fps: fps ?? this.fps,
     rawOpenness: rawOpenness ?? this.rawOpenness,
+    smileProbability:
+        clearSmileProbability
+            ? null
+            : smileProbability ?? this.smileProbability,
     lastEventTime: lastEventTime ?? this.lastEventTime,
   );
 }
@@ -255,6 +263,14 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
               isFaceDetected: tracking.isTracking,
               isStreaming: true,
               rawOpenness: usable ? tracking.mouthOpenness! : 0,
+              smileProbability:
+                  fresh && tracking.isTracking
+                      ? frame.observation.smileProbability
+                      : null,
+              clearSmileProbability:
+                  !fresh ||
+                  !tracking.isTracking ||
+                  frame.observation.smileProbability == null,
               fps: _calculatedFps,
               lastEventTime:
                   transition.justOpened || transition.justClosed

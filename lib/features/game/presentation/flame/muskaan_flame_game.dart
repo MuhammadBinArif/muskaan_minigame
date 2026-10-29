@@ -31,6 +31,8 @@ class MuskaanFlameGame extends FlameGame {
   List<FoodItem> _foods = const [];
   bool _isPlaying = false;
   bool _isMouthOpen = false;
+  double? _movementX;
+  bool _faceReady = false;
   FaceGameControlStatus? _reportedStatus;
   CollisionEvent? _feedbackEvent;
   int? _lastFeedbackTimestamp;
@@ -58,6 +60,11 @@ class MuskaanFlameGame extends FlameGame {
   static const double targetY = 0.52;
 
   double get targetX {
+    if (_movementX != null) {
+      if (size.x <= 0) return _movementX!;
+      final radius = math.min(58.0, size.x * 0.15);
+      return (_movementX! * size.x).clamp(radius, size.x - radius) / size.x;
+    }
     if (size.x <= 0) return control.currentX;
     final radius = math.min(58.0, size.x * 0.15);
     return control.worldX(worldWidth: size.x, targetRadius: radius) / size.x;
@@ -90,6 +97,12 @@ class MuskaanFlameGame extends FlameGame {
 
   void setMouthOpen(bool isOpen) => _isMouthOpen = isOpen;
 
+  /// Supplies the selected movement mode without using face coordinates.
+  void setMovementInput(double x, {required bool faceReady}) {
+    if (x.isFinite) _movementX = x.clamp(.1, .9);
+    _faceReady = faceReady;
+  }
+
   void applyTracking(FaceGameControlSample sample, {DateTime? now}) {
     control.ingest(sample, now: now);
     _reportStatus();
@@ -109,6 +122,8 @@ class MuskaanFlameGame extends FlameGame {
     control.reset();
     avatar.reset();
     _isMouthOpen = false;
+    _movementX = null;
+    _faceReady = false;
     _feedbackEvent = null;
     _lastFeedbackTimestamp = null;
     _feedbackAge = 0;
@@ -129,7 +144,11 @@ class MuskaanFlameGame extends FlameGame {
     control.update(dt);
     _reportStatus();
     if (_isPlaying) {
-      onControlFrame(_isMouthOpen, control.isActionable, targetX);
+      onControlFrame(
+        _isMouthOpen,
+        _movementX == null ? control.isActionable : _faceReady,
+        targetX,
+      );
     }
   }
 

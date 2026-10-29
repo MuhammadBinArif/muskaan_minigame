@@ -11,6 +11,9 @@ import 'package:flutter/foundation.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/game/domain/face_game_control.dart';
+import 'package:muskaan_minigame/features/game/domain/tilt_movement.dart';
+import 'package:muskaan_minigame/features/game/domain/smile_trigger.dart';
+import 'package:muskaan_minigame/features/game/data/tilt_sensor.dart';
 import 'package:muskaan_minigame/features/game/presentation/flame/muskaan_flame_game.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:muskaan_minigame/features/tracking/domain/face_tracking.dart';
@@ -143,6 +146,19 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   bool _disposed = false;
   Timer? _resultTransition;
   late final ProviderSubscription<GameSessionStateData> _avatarEvents;
+  final TiltSensor _tiltSensor = TiltSensor();
+  final TiltMovement _tilt = TiltMovement();
+  final SmileTrigger _smile = SmileTrigger();
+  final List<double> _neutralSamples = [];
+  DateTime? _sensorTime;
+  DateTime? _calibrationStart;
+  Timer? _sensorTimeout;
+  bool _touchMode = false;
+  bool _sensorActive = false;
+  bool _calibratingTilt = false;
+  int _sensorGeneration = 0;
+  bool _catchPending = false;
+  double _movementX = .5;
 
   @override
   void initState() {
@@ -170,6 +186,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       controlConfig: _faceControlConfig(ref.read(calibrationConfigProvider)),
       onControlFrame: (isOpen, isActionable, targetX) {
         if (_disposed || !mounted) return;
+        final before = ref.read(gameSessionProvider).recentCollisions;
         ref
             .read(gameSessionProvider.notifier)
             .updateMouthTracking(
@@ -178,6 +195,17 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
               mouthX: targetX,
               mouthY: MuskaanFlameGame.targetY,
             );
+        if (_catchPending &&
+            !identical(
+              before,
+              ref.read(gameSessionProvider).recentCollisions,
+            )) {
+          _catchPending = false;
+          _game.setMouthOpen(false);
+          ref
+              .read(gameSessionProvider.notifier)
+              .updateMouthTracking(isOpen: false, isActionable: true);
+        }
       },
       onControlStatusChanged: (status) {
         if (!_disposed && _controlStatus.value != status) {
@@ -221,6 +249,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   @override
   void dispose() {
     _disposed = true;
+    _sensorActive = false;
+    _sensorGeneration++;
+    _sensorTimeout?.cancel();
+    unawaited(_tiltSensor.stop());
     _trackingSubscription.close();
     _avatarEvents.close();
     _resultTransition?.cancel();
@@ -251,7 +283,21 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   ) {
     if (_disposed) return;
     _trackingUi.value = next;
-    _game.setMouthOpen(next.latestTransition.isOpen);
+    final faceReady = next.tracking.isTracking && next.smileProbability != null;
+    if (!faceReady) {
+      _smile.update(null, DateTime.now());
+      _catchPending = false;
+      _game.setMouthOpen(false);
+      ref
+          .read(gameSessionProvider.notifier)
+          .updateMouthTracking(isOpen: false, isActionable: true);
+    } else if (ref.read(gameSessionProvider).state ==
+            GameSessionState.playing &&
+        _smile.update(next.smileProbability, next.tracking.updatedAt)) {
+      _catchPending = true;
+      _game.setMouthOpen(true);
+    }
+    _game.setMovementInput(_movementX, faceReady: faceReady);
 
     final unavailable = next.hasCameraError || next.error != null;
     final status =
@@ -264,24 +310,22 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                 FaceGameControlStatus.temporarilyLost,
               FaceTrackingStatus.lost => FaceGameControlStatus.lost,
             };
-    _game.applyTracking(
-      FaceGameControlSample(
-        normalizedX:
-            status == FaceGameControlStatus.tracking
-                ? next.tracking.position?.dx
-                : null,
-        status: status,
-        observedAt: next.tracking.lastDetectedAt ?? next.tracking.updatedAt,
-      ),
-    );
+    _controlStatus.value = status;
 
     if (unavailable &&
         ref.read(gameSessionProvider).state == GameSessionState.playing) {
-      ref.read(gameSessionProvider.notifier).pauseGame();
+      _pause();
     }
   }
 
   void _pause() {
+    _sensorActive = false;
+    _sensorGeneration++;
+    _calibratingTilt = false;
+    _sensorTimeout?.cancel();
+    unawaited(_tiltSensor.stop());
+    _catchPending = false;
+    _game.setMouthOpen(false);
     ref.read(gameSessionProvider.notifier).pauseGame();
     _game.pauseControl();
     _game.pauseEngine();
@@ -296,6 +340,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       _game.resumeControl();
       _game.resumeEngine();
       ref.read(gameSessionProvider.notifier).resumeGame();
+      _startSensor();
     }
   }
 
@@ -315,7 +360,144 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       _game.resetControl();
       _game.resumeEngine();
       ref.read(gameSessionProvider.notifier).startGame();
+      _smile.reset();
+      _catchPending = false;
+      _movementX = .5;
+      _game.setMovementInput(
+        _movementX,
+        faceReady:
+            tracking.tracking.isTracking && tracking.smileProbability != null,
+      );
+      _startSensor();
     }
+  }
+
+  void _startSensor() {
+    if (_touchMode || _disposed || _sensorActive) return;
+    _sensorActive = true;
+    final generation = ++_sensorGeneration;
+    if (mounted) setState(() => _calibratingTilt = true);
+    _sensorTimeout?.cancel();
+    _sensorTimeout = Timer(const Duration(seconds: 3), () {
+      if (!mounted || !_sensorActive || generation != _sensorGeneration) return;
+      _sensorActive = false;
+      unawaited(_tiltSensor.stop());
+      setState(() {
+        _touchMode = true;
+        _calibratingTilt = false;
+      });
+    });
+    _calibrationStart = null;
+    _sensorTime = null;
+    _neutralSamples.clear();
+    try {
+      _tiltSensor.start(
+        onAngle: (angle) {
+          if (!_sensorActive ||
+              generation != _sensorGeneration ||
+              _disposed ||
+              _touchMode ||
+              ref.read(gameSessionProvider).state != GameSessionState.playing) {
+            return;
+          }
+          final now = DateTime.now();
+          _calibrationStart ??= now;
+          if (now.difference(_calibrationStart!) < const Duration(seconds: 1)) {
+            _neutralSamples.add(angle);
+            return;
+          }
+          if (_neutralSamples.isNotEmpty) {
+            if (!_tilt.calibrateStable(_neutralSamples)) {
+              _sensorActive = false;
+              _sensorTimeout?.cancel();
+              unawaited(_tiltSensor.stop());
+              if (mounted) {
+                setState(() {
+                  _touchMode = true;
+                  _calibratingTilt = false;
+                });
+              }
+              return;
+            }
+            _sensorTimeout?.cancel();
+            if (mounted) setState(() => _calibratingTilt = false);
+            _tilt.position = _movementX;
+            _neutralSamples.clear();
+            _sensorTime = now;
+            return;
+          }
+          final previous = _sensorTime;
+          _sensorTime = now;
+          if (previous == null) return;
+          final dt = now.difference(previous).inMicroseconds / 1000000;
+          if (dt <= 0 || dt > .25) return;
+          _movementX = _tilt.update(angle, dt);
+          _game.setMovementInput(
+            _movementX,
+            faceReady:
+                _trackingUi.value.tracking.isTracking &&
+                _trackingUi.value.smileProbability != null,
+          );
+        },
+        onError: (_) {
+          if (!mounted ||
+              _disposed ||
+              generation != _sensorGeneration ||
+              !_sensorActive) {
+            return;
+          }
+          _sensorActive = false;
+          _sensorTimeout?.cancel();
+          unawaited(_tiltSensor.stop());
+          setState(() {
+            _touchMode = true;
+            _calibratingTilt = false;
+          });
+        },
+      );
+    } catch (_) {
+      _sensorActive = false;
+      _sensorTimeout?.cancel();
+      if (mounted) {
+        setState(() {
+          _touchMode = true;
+          _calibratingTilt = false;
+        });
+      }
+    }
+  }
+
+  void _setTouchMode(bool touch) {
+    setState(() {
+      _touchMode = touch;
+      _calibratingTilt = false;
+    });
+    _sensorActive = false;
+    _sensorGeneration++;
+    _sensorTimeout?.cancel();
+    unawaited(
+      _tiltSensor.stop().then((_) {
+        if (mounted &&
+            !_touchMode &&
+            ref.read(gameSessionProvider).state == GameSessionState.playing) {
+          _startSensor();
+        }
+      }),
+    );
+  }
+
+  void _moveTouch(double delta) {
+    if (!_touchMode ||
+        ref.read(gameSessionProvider).state != GameSessionState.playing) {
+      return;
+    }
+    _movementX = (_movementX + delta).clamp(.1, .9);
+    _game.setMovementInput(
+      _movementX,
+      faceReady:
+          _trackingUi.value.tracking.isTracking &&
+          _trackingUi.value.smileProbability != null,
+    );
   }
 
   @override
@@ -549,14 +731,13 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                   valueListenable: _trackingUi,
                   builder:
                       (context, trackingState, _) => Text(
-                        trackingState.latestTransition.isOpen
-                            ? 'MOUTH OPEN'
-                            : 'OPEN MOUTH',
+                        trackingState.smileProbability == null
+                            ? 'FACE NOT DETECTED'
+                            : _catchPending
+                            ? 'SMILE READY'
+                            : 'SMILE TO CATCH',
                         style: _T.mouthLabel.copyWith(
-                          color:
-                              trackingState.latestTransition.isOpen
-                                  ? _C.mouthGreen
-                                  : _C.textDim,
+                          color: _catchPending ? _C.mouthGreen : _C.textDim,
                         ),
                       ),
                 ),
@@ -581,6 +762,53 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
               valueListenable: _controlStatus,
               builder:
                   (context, status, _) => _TrackingInstruction(status: status),
+            ),
+          ),
+        if (session.state == GameSessionState.playing)
+          Positioned(
+            bottom: 54,
+            left: 12,
+            right: 12,
+            child: SafeArea(
+              top: false,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  if (_touchMode)
+                    IconButton(
+                      onPressed: () => _moveTouch(-.08),
+                      icon: const Icon(Icons.arrow_circle_left_outlined),
+                      color: Colors.white,
+                      tooltip: 'Move left',
+                    )
+                  else
+                    const SizedBox(width: 48),
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: TextButton(
+                        onPressed: () => _setTouchMode(!_touchMode),
+                        child: Text(
+                          _touchMode
+                              ? 'Touch · switch to tilt'
+                              : _calibratingTilt
+                              ? 'Hold phone comfortably · switch to touch'
+                              : 'Tilt · switch to touch',
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_touchMode)
+                    IconButton(
+                      onPressed: () => _moveTouch(.08),
+                      icon: const Icon(Icons.arrow_circle_right_outlined),
+                      color: Colors.white,
+                      tooltip: 'Move right',
+                    )
+                  else
+                    const SizedBox(width: 48),
+                ],
+              ),
             ),
           ),
         if (!kReleaseMode)
