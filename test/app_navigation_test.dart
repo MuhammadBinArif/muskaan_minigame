@@ -40,8 +40,12 @@ void main() {
   /// Uses `pump(Duration)` instead of `pumpAndSettle()` because several
   /// screens (Home, Calibration, Countdown, Gameplay) run infinite
   /// animations that would make `pumpAndSettle` time out.
-  Future<void> pumpApp(WidgetTester tester, String initialLocation) async {
-    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+  Future<void> pumpApp(
+    WidgetTester tester,
+    String initialLocation, {
+    Size logicalSize = const Size(390, 844),
+  }) async {
+    tester.view.physicalSize = logicalSize * 3;
     tester.view.devicePixelRatio = 3.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -309,7 +313,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 600));
 
-      expect(find.text('PROFILE'), findsOneWidget);
+      expect(find.text('My Profile'), findsOneWidget);
     });
 
     testWidgets('Smile Spotlight card → Smile screen', (tester) async {
@@ -1149,22 +1153,46 @@ void main() {
     ) async {
       await pumpApp(tester, '/profile');
 
-      expect(find.text('PROFILE'), findsOneWidget);
-      expect(find.text('Blaven Name'), findsOneWidget);
-      expect(find.text('@player_123'), findsOneWidget);
+      expect(find.text('PLAYER HUB'), findsOneWidget);
+      expect(find.text('My Profile'), findsOneWidget);
+      expect(find.text('Arjun Khan'), findsOneWidget);
+      expect(find.text('Street Snacker · Level 12'), findsOneWidget);
+      expect(find.text('360 XP to level 13'), findsOneWidget);
 
-      expect(find.text('9,480'), findsOneWidget);
-      expect(find.text('47'), findsOneWidget);
-      expect(find.text('68%'), findsOneWidget);
+      expect(find.text('12,480'), findsOneWidget);
+      expect(find.text('x8'), findsOneWidget);
+      expect(find.text('7 days'), findsOneWidget);
 
-      expect(find.text('ACHIEVEMENTS'), findsOneWidget);
-      expect(find.text('First Catch'), findsOneWidget);
-      expect(find.text('Combo Master'), findsOneWidget);
-      expect(find.text('100 Catches'), findsOneWidget);
-      expect(find.text('Perfect Games'), findsOneWidget);
+      expect(find.text('Make it yours'), findsOneWidget);
+      expect(find.text('OPEN AVATAR STUDIO'), findsOneWidget);
+      expect(find.text('Achievements'), findsOneWidget);
+      expect(find.text('14 of 30 unlocked'), findsOneWidget);
+    });
 
-      expect(find.text('LEVEL PROGRESS'), findsOneWidget);
-      expect(find.text('2,450 / 5,000 XP'), findsOneWidget);
+    testWidgets('matches the 337x700 reference geometry', (tester) async {
+      await pumpApp(tester, '/profile', logicalSize: const Size(337, 700));
+
+      void expectRect(String key, Rect expected) {
+        final rect = tester.getRect(find.byKey(Key(key)));
+        expect(rect.left, closeTo(expected.left, 0.01));
+        expect(rect.top, closeTo(expected.top, 0.01));
+        expect(rect.width, closeTo(expected.width, 0.01));
+        expect(rect.height, closeTo(expected.height, 0.01));
+      }
+
+      expectRect('profile-panel', const Rect.fromLTWH(9, 6, 320, 694));
+      expectRect('profile-header', const Rect.fromLTWH(27, 48, 288, 44));
+      expectRect(
+        'profile-identity-card',
+        const Rect.fromLTWH(27, 103, 288, 109),
+      );
+      expectRect('profile-stats', const Rect.fromLTWH(27, 224, 288, 55));
+      expectRect('profile-avatar-card', const Rect.fromLTWH(27, 291, 288, 188));
+      expectRect(
+        'profile-achievement-card',
+        const Rect.fromLTWH(27, 491, 288, 57),
+      );
+      expectRect('compact-bottom-nav', const Rect.fromLTWH(9, 644, 320, 56));
     });
 
     testWidgets('name tap enters edit mode', (tester) async {
@@ -1172,7 +1200,7 @@ void main() {
 
       expect(find.byType(TextField), findsNothing);
 
-      await tester.tap(find.byIcon(Icons.edit));
+      await tester.tap(find.byIcon(Icons.edit_outlined).first);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -1180,9 +1208,73 @@ void main() {
       expect(find.byIcon(Icons.check), findsOneWidget);
     });
 
+    testWidgets('settings button opens Settings and back returns', (
+      tester,
+    ) async {
+      await pumpApp(tester, '/profile');
+
+      await tester.tap(find.byKey(const Key('profile-settings')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('Sound effects'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('settings-back')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('My Profile'), findsOneWidget);
+    });
+
     testWidgets('bottom nav — profile tab highlighted', (tester) async {
       await pumpApp(tester, '/profile');
-      expect(find.text('PROFILE'), findsOneWidget);
+      expect(find.text('My Profile'), findsOneWidget);
+    });
+  });
+
+  group('Settings Screen', () {
+    testWidgets('renders all settings and privacy disclosure', (tester) async {
+      await pumpApp(tester, '/settings');
+
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('Tune your game your way'), findsOneWidget);
+      expect(find.text('SOUND & FEEL'), findsOneWidget);
+      expect(find.text('Sound effects'), findsOneWidget);
+      expect(find.text('Market music'), findsOneWidget);
+      expect(find.text('Haptic feedback'), findsOneWidget);
+      expect(find.text('Master volume'), findsOneWidget);
+      expect(find.text('72%'), findsOneWidget);
+      expect(find.text('GAMEPLAY & PRIVACY'), findsOneWidget);
+      expect(find.text('Game reminders'), findsOneWidget);
+      expect(find.text('Camera & face tracking'), findsOneWidget);
+      expect(find.text('Language'), findsOneWidget);
+      expect(find.text('Accessibility'), findsOneWidget);
+      expect(
+        find.text('Camera video is never recorded or uploaded.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('matches the 322x680 reference geometry', (tester) async {
+      await pumpApp(tester, '/settings', logicalSize: const Size(322, 680));
+
+      void expectRect(String key, Rect expected) {
+        final rect = tester.getRect(find.byKey(Key(key)));
+        expect(rect.left, closeTo(expected.left, 0.01));
+        expect(rect.top, closeTo(expected.top, 0.01));
+        expect(rect.width, closeTo(expected.width, 0.01));
+        expect(rect.height, closeTo(expected.height, 0.01));
+      }
+
+      expectRect('settings-panel', const Rect.fromLTWH(0, 0, 320, 680));
+      expectRect('settings-header', const Rect.fromLTWH(18, 34, 288, 45));
+      expectRect('sound-settings-card', const Rect.fromLTWH(18, 114, 288, 231));
+      expectRect(
+        'gameplay-settings-card',
+        const Rect.fromLTWH(18, 376, 288, 211),
+      );
+      expectRect('camera-privacy-note', const Rect.fromLTWH(18, 599, 288, 18));
     });
   });
 

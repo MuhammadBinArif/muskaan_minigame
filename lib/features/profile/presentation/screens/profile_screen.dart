@@ -1,162 +1,56 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:muskaan_minigame/features/ads/ad_service.dart';
+import 'package:muskaan_minigame/shared/widgets/app_bottom_nav.dart';
 
-import '../../domain/profile_avatar.dart';
-import '../../../../shared/widgets/app_bottom_nav.dart';
-
-// ============================================================
-// THEME
-// ============================================================
-class _C {
-  static const bgTop = Color(0xFF14122A);
-  static const bgBot = Color(0xFF07060F);
-
-  static const card = Color(0xFF1E1B33);
-  static const cardSoft = Color(0xFF262243);
-  static const border = Color(0x22FFFFFF);
-
-  static const orange = Color(0xFFFF7A1A);
-  static const orangeGlow = Color(0xFFFFB45C);
-  static const gold = Color(0xFFFFD86B);
-  static const green = Color(0xFF3DD68C);
-
-  static const cream = Color(0xFFFDF5E6);
-  static const textSoft = Color(0xFFC7C3D6);
-  static const textDim = Color(0xFF8E8AA0);
-
-  static const lockedBg = Color(0xFF14122A);
+class _ProfileColors {
+  static const page = Color(0xFF100C14);
+  static const panelTop = Color(0xFF211F32);
+  static const panelBottom = Color(0xFF1C1A2B);
+  static const card = Color(0xFF2A2945);
+  static const cardDark = Color(0xFF24233B);
+  static const identityTop = Color(0xFF3B3440);
+  static const identityBottom = Color(0xFF29283E);
+  static const orange = Color(0xFFFF6332);
+  static const gold = Color(0xFFFFD83D);
+  static const cream = Color(0xFFFFF7EC);
+  static const body = Color(0xFFC9C5D4);
+  static const muted = Color(0xFF8D899E);
+  static const track = Color(0xFF19172D);
 }
 
-class _T {
-  static const page = TextStyle(
-    fontSize: 22,
-    fontWeight: FontWeight.w900,
-    color: _C.cream,
-  );
-  static const name = TextStyle(
-    fontSize: 20,
-    fontWeight: FontWeight.w800,
-    color: _C.cream,
-  );
-  static const welcome = TextStyle(
-    fontSize: 22,
-    fontWeight: FontWeight.w900,
-    color: _C.cream,
-  );
-  static const handle = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-    color: _C.textDim,
-  );
-  static const levelPill = TextStyle(
-    fontSize: 10,
-    fontWeight: FontWeight.w800,
-    color: _C.gold,
-    letterSpacing: 1.0,
-  );
-  static const statValue = TextStyle(
-    fontSize: 20,
-    fontWeight: FontWeight.w900,
-    color: _C.gold,
-  );
-  static const statLabel = TextStyle(
-    fontSize: 9,
-    fontWeight: FontWeight.w600,
-    color: _C.textDim,
-    letterSpacing: 1.5,
-  );
-  static const sectionTitle = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w700,
-    color: _C.textSoft,
-    letterSpacing: 1.2,
-  );
-  static const viewAll = TextStyle(
-    fontSize: 11,
-    fontWeight: FontWeight.w700,
-    color: _C.orange,
-  );
-  static const achLabel = TextStyle(
-    fontSize: 9,
-    fontWeight: FontWeight.w600,
-    color: _C.textDim,
-  );
-  static const progressLabel = TextStyle(
-    fontSize: 11,
-    fontWeight: FontWeight.w600,
-    color: _C.textSoft,
-  );
-  static const progressValue = TextStyle(
-    fontSize: 11,
-    fontWeight: FontWeight.w800,
-    color: _C.gold,
-  );
-  static const tooltip = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w600,
-    color: _C.cream,
-  );
-  static const toast = TextStyle(
-    fontSize: 10,
-    fontWeight: FontWeight.w800,
-    color: _C.gold,
-    letterSpacing: 1.5,
-  );
-  static const toastValue = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w800,
-    color: _C.cream,
-  );
-}
-
-// ============================================================
-// SCREEN
-// ============================================================
 class ProfileScreen extends ConsumerStatefulWidget {
-  /// When true, the "New User" layout is shown (Screens 07).
-  final bool isNewUser;
-
-  /// When true, the achievement toast is shown (Screen 09).
-  final bool showAchievementToast;
-
   const ProfileScreen({
     super.key,
     this.isNewUser = false,
     this.showAchievementToast = false,
   });
 
+  final bool isNewUser;
+  final bool showAchievementToast;
+
   @override
   ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  bool _editingName = false;
-  late final TextEditingController _nameController;
-
-  // Demo stats.
-  static const int _bestScore = 9480;
-  static const int _games = 47;
-  static const int _winRate = 68;
-  static const int _level = 12;
-  static const int _levelProgress = 12;
-  static const int _levelTotal = 13;
-  static const int _currentXp = 2450;
-  static const int _totalXp = 5000;
-
-  // Achievements: title + emoji + unlocked.
-  static const List<_Ach> _achievements = <_Ach>[
-    _Ach(label: 'First Catch', emoji: '🎯', unlocked: true),
-    _Ach(label: 'Combo Master', emoji: '⚡', unlocked: true),
-    _Ach(label: '100 Catches', emoji: '🏆', unlocked: true),
-    _Ach(label: 'Perfect Games', emoji: '🔒', unlocked: false),
+  static const List<String> _avatarOptions = <String>[
+    '🧑🏽‍🦱',
+    '👨🏾',
+    '👩🏽',
+    '👩🏻',
   ];
+
+  late final TextEditingController _nameController;
+  bool _editingName = false;
+  int _selectedAvatar = 0;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(
-      text: widget.isNewUser ? 'PlayerName' : 'Blaven Name',
+      text: widget.isNewUser ? 'PlayerName' : 'Arjun Khan',
     );
   }
 
@@ -166,521 +60,195 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     super.dispose();
   }
 
-  String _fmt(int n) {
-    final s = n.toString();
-    final b = StringBuffer();
-    for (int i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
-      b.write(s[i]);
-    }
-    return b.toString();
-  }
-
-  void _toggleEdit() {
+  void _toggleNameEditing() {
     setState(() => _editingName = !_editingName);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _C.bgBot,
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [_C.bgTop, _C.bgBot],
-          ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: Stack(
-            children: [
-              // ---- Scrollable content ----
-              SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildHeader(),
-                    const SizedBox(height: 20),
-                    _buildAvatarRow(),
-                    const SizedBox(height: 16),
-                    if (widget.isNewUser) ...[
-                      _buildNewUserTooltip(),
-                      const SizedBox(height: 20),
+      backgroundColor: _ProfileColors.page,
+      body: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(9, 6, 8, 0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(34),
+              child: DecoratedBox(
+                key: const Key('profile-panel'),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      _ProfileColors.panelTop,
+                      _ProfileColors.panelBottom,
                     ],
-                    _buildStats(),
-                    const SizedBox(height: 20),
-                    _buildAchievements(),
-                    const SizedBox(height: 20),
-                    _buildLevelProgress(),
-                    if (ref.read(adServiceProvider).privacyOptionsRequired)
-                      TextButton(
-                        onPressed: () async {
-                          final shown =
-                              await ref
-                                  .read(adServiceProvider)
-                                  .showPrivacyOptions();
-                          if (!shown && context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Privacy choices are unavailable. Please try again.',
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text('Advertising privacy choices'),
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    Column(
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(18, 42, 14, 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _buildHeader(),
+                                const SizedBox(height: 11),
+                                _buildIdentityCard(),
+                                const SizedBox(height: 12),
+                                _buildStats(),
+                                const SizedBox(height: 12),
+                                _buildAvatarCard(),
+                                const SizedBox(height: 12),
+                                _buildAchievementCard(),
+                                if (ref
+                                    .read(adServiceProvider)
+                                    .privacyOptionsRequired) ...[
+                                  const SizedBox(height: 8),
+                                  _buildPrivacyButton(),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                        const AppBottomNav(currentIndex: 4, compact: true),
+                      ],
+                    ),
+                    if (widget.showAchievementToast)
+                      const Positioned(
+                        top: 10,
+                        left: 18,
+                        right: 18,
+                        child: _AchievementToast(),
                       ),
                   ],
                 ),
               ),
-
-              // ---- Achievement toast ----
-              if (widget.showAchievementToast)
-                Positioned(
-                  top: 8,
-                  left: 20,
-                  right: 20,
-                  child: _AchievementToast(),
-                ),
-            ],
+            ),
           ),
         ),
       ),
-      bottomNavigationBar: const AppBottomNav(currentIndex: 4),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Header
-  // ---------------------------------------------------------------------------
   Widget _buildHeader() {
-    return Row(
-      children: [
-        const Expanded(child: Text('PROFILE', style: _T.page)),
-        Semantics(
-          button: true,
-          label: 'Settings',
-          child: Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: _C.orange.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _C.orange.withValues(alpha: 0.35)),
-            ),
-            child: const Icon(Icons.settings, size: 16, color: _C.orange),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Avatar + name + level
-  // ---------------------------------------------------------------------------
-  Widget _buildAvatarRow() {
-    return Column(
-      children: [
-        Stack(
-          alignment: Alignment.bottomRight,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [_C.orangeGlow, _C.orange],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: _C.orange.withValues(alpha: 0.4),
-                    blurRadius: 20,
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                resolveAvatarState(ref.watch(profileAvatarProvider)).symbol,
-                style: const TextStyle(fontSize: 52, height: 1.0),
-              ),
-            ),
-            // Level badge
-            Container(
-              width: 30,
-              height: 30,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _C.gold,
-                border: Border.all(color: _C.bgBot, width: 3),
-              ),
-              child: Text(
-                '$_level',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF3B2A00),
-                  height: 1.0,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Name (editable when _editingName)
-        _buildNameRow(),
-
-        const SizedBox(height: 4),
-        const Text('@player_123', style: _T.handle),
-        const SizedBox(height: 8),
-        _buildLevelPill(),
-      ],
-    );
-  }
-
-  Widget _buildNameRow() {
-    if (widget.isNewUser && !_editingName) {
-      return const Text('Welcome Blaven!', style: _T.welcome);
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_editingName)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: _C.cardSoft,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _C.orange.withValues(alpha: 0.6)),
-            ),
-            child: IntrinsicWidth(
-              child: TextField(
-                controller: _nameController,
-                autofocus: true,
-                textAlign: TextAlign.center,
-                cursorColor: _C.orange,
-                style: _T.name,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                  border: InputBorder.none,
-                ),
-              ),
-            ),
-          )
-        else
-          Text(_nameController.text, style: _T.name),
-        const SizedBox(width: 8),
-        Semantics(
-          button: true,
-          label: _editingName ? 'Save name' : 'Edit name',
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: _toggleEdit,
-              child: Container(
-                width: 30,
-                height: 30,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color:
-                      _editingName
-                          ? _C.green.withValues(alpha: 0.15)
-                          : _C.cardSoft,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  _editingName ? Icons.check : Icons.edit,
-                  size: 14,
-                  color: _editingName ? _C.green : _C.textSoft,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLevelPill() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: _C.gold.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _C.gold.withValues(alpha: 0.35)),
-      ),
+    return SizedBox(
+      key: const Key('profile-header'),
+      height: 44,
       child: Row(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Text('⭐', style: TextStyle(fontSize: 10, height: 1.0)),
-          const SizedBox(width: 6),
-          Text(
-            'LEVEL $_level  ·  $_levelProgress / $_levelTotal',
-            style: _T.levelPill,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // New-user tooltip
-  // ---------------------------------------------------------------------------
-  Widget _buildNewUserTooltip() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: _C.cardSoft,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _C.orange.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        children: [
-          const Text('⚡', style: TextStyle(fontSize: 14, height: 1.0)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Catch your first gol gappa to begin your journey!',
-              style: _T.tooltip,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Stats
-  // ---------------------------------------------------------------------------
-  Widget _buildStats() {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildStat(
-            value: widget.isNewUser ? '—' : _fmt(_bestScore),
-            label: 'BEST SCORE',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildStat(
-            value: widget.isNewUser ? '—' : '$_games',
-            label: 'GAMES',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildStat(
-            value: widget.isNewUser ? '—' : '$_winRate%',
-            label: 'WIN RATE',
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStat({required String value, required String label}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      decoration: BoxDecoration(
-        color: _C.card,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        children: [
-          Text(value, style: _T.statValue),
-          const SizedBox(height: 4),
-          Text(label, style: _T.statLabel),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Achievements
-  // ---------------------------------------------------------------------------
-  Widget _buildAchievements() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            const Expanded(child: Text('ACHIEVEMENTS', style: _T.sectionTitle)),
-            GestureDetector(
-              onTap: () {},
-              child: const Text('View All →', style: _T.viewAll),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: List.generate(_achievements.length, (i) {
-            final a = _achievements[i];
-            return Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  right: i < _achievements.length - 1 ? 8 : 0,
-                ),
-                child: _buildAchTile(a),
-              ),
-            );
-          }),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAchTile(_Ach a) {
-    final unlocked = a.unlocked;
-    return Column(
-      children: [
-        Container(
-          width: 48,
-          height: 48,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: unlocked ? _C.orange.withValues(alpha: 0.15) : _C.lockedBg,
-            border: Border.all(
-              color: unlocked ? _C.orange.withValues(alpha: 0.5) : _C.border,
-            ),
-            boxShadow:
-                unlocked
-                    ? [
-                      BoxShadow(
-                        color: _C.orange.withValues(alpha: 0.25),
-                        blurRadius: 10,
-                      ),
-                    ]
-                    : null,
-          ),
-          child: Text(
-            a.emoji,
-            style: const TextStyle(fontSize: 20, height: 1.0),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          a.label,
-          style: _T.achLabel,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-        ),
-      ],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Level progress + daily streak
-  // ---------------------------------------------------------------------------
-  Widget _buildLevelProgress() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _C.card,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text('LEVEL PROGRESS', style: _T.progressLabel),
-              ),
-              Text(
-                '${_fmt(_currentXp)} / ${_fmt(_totalXp)} XP',
-                style: _T.progressValue,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _ProgressBar(fraction: _currentXp / _totalXp),
-          const SizedBox(height: 16),
-          const Text('DAILY STREAK', style: _T.progressLabel),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(7, (i) {
-              final done = i < 3;
-              return Container(
-                width: 28,
-                height: 28,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: done ? _C.orange.withValues(alpha: 0.9) : _C.cardSoft,
-                  border: Border.all(color: done ? _C.orangeGlow : _C.border),
-                ),
-                child: Text(
-                  ['M', 'T', 'W', 'T', 'F', 'S', 'S'][i],
+          const Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'PLAYER HUB',
                   style: TextStyle(
+                    color: _ProfileColors.muted,
                     fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: done ? Colors.white : _C.textDim,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 1.8,
                   ),
                 ),
-              );
-            }),
+                SizedBox(height: 4),
+                Text(
+                  'My Profile',
+                  style: TextStyle(
+                    color: _ProfileColors.cream,
+                    fontSize: 17,
+                    height: 1,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Material(
+            color: _ProfileColors.card,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              key: const Key('profile-settings'),
+              onTap: () => context.push('/settings'),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF44415F)),
+                ),
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.settings_outlined,
+                  color: _ProfileColors.body,
+                  size: 18,
+                  semanticLabel: 'Settings',
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-// ============================================================
-// Achievement toast
-// ============================================================
-class _AchievementToast extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildIdentityCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      key: const Key('profile-identity-card'),
+      height: 109,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: _C.cardSoft,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _C.gold.withValues(alpha: 0.45)),
-        boxShadow: [
-          BoxShadow(color: _C.gold.withValues(alpha: 0.20), blurRadius: 20),
-        ],
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_ProfileColors.identityTop, _ProfileColors.identityBottom],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _ProfileColors.orange.withValues(alpha: .58)),
       ),
       child: Row(
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: _C.gold.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Text(
-              '🏆',
-              style: TextStyle(fontSize: 18, height: 1.0),
-            ),
+          _AvatarPortrait(
+            symbol: _avatarOptions[_selectedAvatar],
+            size: 64,
+            selected: true,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('ACHIEVEMENT UNLOCKED', style: _T.toast),
-                SizedBox(height: 2),
-                Text('100 Catches', style: _T.toastValue),
+              children: [
+                _buildNameRow(),
+                const SizedBox(height: 5),
+                const Text(
+                  'Street Snacker · Level 12',
+                  style: TextStyle(
+                    color: _ProfileColors.body,
+                    fontSize: 10,
+                    height: 1,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 11),
+                const _XpProgress(),
+                const SizedBox(height: 5),
+                const Text(
+                  '360 XP to level 13',
+                  style: TextStyle(
+                    color: _ProfileColors.muted,
+                    fontSize: 8,
+                    height: 1,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           ),
@@ -688,31 +256,347 @@ class _AchievementToast extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildNameRow() {
+    return Row(
+      children: [
+        Expanded(
+          child:
+              _editingName
+                  ? SizedBox(
+                    height: 26,
+                    child: TextField(
+                      controller: _nameController,
+                      autofocus: true,
+                      cursorColor: _ProfileColors.orange,
+                      style: const TextStyle(
+                        color: _ProfileColors.cream,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 3),
+                        border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: _ProfileColors.orange),
+                        ),
+                      ),
+                    ),
+                  )
+                  : Text(
+                    _nameController.text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _ProfileColors.cream,
+                      fontSize: 16,
+                      height: 1,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+        ),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _toggleNameEditing,
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: Icon(
+                _editingName ? Icons.check : Icons.edit_outlined,
+                color:
+                    _editingName ? _ProfileColors.gold : _ProfileColors.muted,
+                size: 15,
+                semanticLabel: _editingName ? 'Save name' : 'Edit name',
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStats() {
+    final values =
+        widget.isNewUser
+            ? const <(String, String)>[
+              ('—', 'Best score'),
+              ('—', 'Best combo'),
+              ('—', 'Hot streak'),
+            ]
+            : const <(String, String)>[
+              ('12,480', 'Best score'),
+              ('x8', 'Best combo'),
+              ('7 days', 'Hot streak'),
+            ];
+
+    return SizedBox(
+      key: const Key('profile-stats'),
+      height: 55,
+      child: Row(
+        children: [
+          for (int i = 0; i < values.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: _ProfileColors.card,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: const Color(0xFF34334F)),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      values[i].$1,
+                      style: const TextStyle(
+                        color: _ProfileColors.gold,
+                        fontSize: 12,
+                        height: 1,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      values[i].$2,
+                      style: const TextStyle(
+                        color: _ProfileColors.muted,
+                        fontSize: 8,
+                        height: 1,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAvatarCard() {
+    return Container(
+      key: const Key('profile-avatar-card'),
+      height: 188,
+      padding: const EdgeInsets.fromLTRB(13, 15, 13, 12),
+      decoration: BoxDecoration(
+        color: _ProfileColors.card,
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Make it yours',
+                  style: TextStyle(
+                    color: _ProfileColors.cream,
+                    fontSize: 12,
+                    height: 1,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.palette_outlined,
+                color: _ProfileColors.orange,
+                size: 18,
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            'Pick a look or build your own avatar',
+            style: TextStyle(
+              color: _ProfileColors.muted,
+              fontSize: 9,
+              height: 1,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 11),
+          SizedBox(
+            height: 61,
+            child: Row(
+              children: [
+                for (int i = 0; i < _avatarOptions.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 7),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedAvatar = i),
+                      child: _AvatarPortrait(
+                        symbol: _avatarOptions[i],
+                        size: 61,
+                        selected: i == _selectedAvatar,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 11),
+          Expanded(
+            child: Semantics(
+              button: true,
+              label: 'Open avatar studio',
+              child: Container(
+                key: const Key('open-avatar-studio'),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _ProfileColors.orange),
+                ),
+                alignment: Alignment.center,
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.edit_outlined,
+                      color: _ProfileColors.orange,
+                      size: 17,
+                    ),
+                    SizedBox(width: 9),
+                    Text(
+                      'OPEN AVATAR STUDIO',
+                      style: TextStyle(
+                        color: _ProfileColors.orange,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: .25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAchievementCard() {
+    return Container(
+      key: const Key('profile-achievement-card'),
+      height: 57,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: _ProfileColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _ProfileColors.gold.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.star_border_rounded,
+              size: 18,
+              color: _ProfileColors.gold,
+            ),
+          ),
+          const SizedBox(width: 11),
+          const Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Achievements',
+                  style: TextStyle(
+                    color: _ProfileColors.cream,
+                    fontSize: 11,
+                    height: 1,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  '14 of 30 unlocked',
+                  style: TextStyle(
+                    color: _ProfileColors.muted,
+                    fontSize: 8,
+                    height: 1,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: _ProfileColors.muted,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrivacyButton() {
+    return TextButton(
+      onPressed: () async {
+        final shown = await ref.read(adServiceProvider).showPrivacyOptions();
+        if (!shown && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Privacy choices are unavailable. Please try again.',
+              ),
+            ),
+          );
+        }
+      },
+      child: const Text('Advertising privacy choices'),
+    );
+  }
 }
 
-// ============================================================
-// Progress bar
-// ============================================================
-class _ProgressBar extends StatelessWidget {
-  final double fraction;
+class _AvatarPortrait extends StatelessWidget {
+  const _AvatarPortrait({
+    required this.symbol,
+    required this.size,
+    required this.selected,
+  });
 
-  const _ProgressBar({required this.fraction});
+  final String symbol;
+  final double size;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 8,
-      decoration: BoxDecoration(
-        color: const Color(0xFF14122A),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: FractionallySizedBox(
-        alignment: Alignment.centerLeft,
-        widthFactor: fraction.clamp(0.0, 1.0),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            gradient: const LinearGradient(colors: [_C.orange, _C.gold]),
+    return SizedBox.square(
+      dimension: size,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors:
+                selected
+                    ? const [Color(0xFFFFD16A), Color(0xFFFF7A52)]
+                    : const [Color(0xFFFFE08B), Color(0xFF8D6DEB)],
+          ),
+          border: Border.all(
+            color: selected ? _ProfileColors.orange : const Color(0xFFE7DEFF),
+            width: selected ? 3 : 2,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            symbol,
+            style: TextStyle(fontSize: size * .55, height: 1),
           ),
         ),
       ),
@@ -720,17 +604,63 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
-// ============================================================
-// Data
-// ============================================================
-class _Ach {
-  final String label;
-  final String emoji;
-  final bool unlocked;
+class _XpProgress extends StatelessWidget {
+  const _XpProgress();
 
-  const _Ach({
-    required this.label,
-    required this.emoji,
-    required this.unlocked,
-  });
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        height: 6,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const ColoredBox(color: _ProfileColors.track),
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: .72,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [_ProfileColors.orange, _ProfileColors.gold],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AchievementToast extends StatelessWidget {
+  const _AchievementToast();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _ProfileColors.cardDark,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _ProfileColors.gold.withValues(alpha: .5)),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.emoji_events, color: _ProfileColors.gold, size: 22),
+          SizedBox(width: 10),
+          Text(
+            'Achievement unlocked · 100 Catches',
+            style: TextStyle(
+              color: _ProfileColors.cream,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

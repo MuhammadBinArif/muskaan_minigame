@@ -8,8 +8,13 @@ import 'package:go_router/go_router.dart';
 class AppBottomNav extends StatelessWidget {
   /// 0 = Home, 1 = Challenges, 2 = Games, 3 = Smile, 4 = Profile
   final int currentIndex;
+  final bool compact;
 
-  const AppBottomNav({super.key, required this.currentIndex});
+  const AppBottomNav({
+    super.key,
+    required this.currentIndex,
+    this.compact = false,
+  });
 
   static const Color _bg = Color(0xFF14111E);
   static const Color _active = Color(0xFFFF6B35);
@@ -30,7 +35,8 @@ class AppBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 80,
+      key: compact ? const Key('compact-bottom-nav') : null,
+      height: compact ? 56 : 80,
       decoration: const BoxDecoration(
         color: _bg,
         border: Border(top: BorderSide(color: Colors.white10, width: 1)),
@@ -53,17 +59,17 @@ class AppBottomNav extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(item.icon, color: color, size: 24),
-                  const SizedBox(height: 4),
+                  Icon(item.icon, color: color, size: compact ? 19 : 24),
+                  SizedBox(height: compact ? 3 : 4),
                   Text(
-                    item.label,
+                    compact && i == 2 ? 'Play' : item.label,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: compact ? 8 : 10,
                       fontWeight: FontWeight.w600,
                       color: color,
                     ),
                   ),
-                  if (isActive) ...[
+                  if (isActive && !compact) ...[
                     const SizedBox(height: 4),
                     Container(
                       width: 4,
