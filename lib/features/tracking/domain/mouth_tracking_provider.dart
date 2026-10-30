@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show Offset;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 import 'package:muskaan_minigame/core/domain/mouth_tracking_result.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
@@ -13,9 +14,21 @@ import 'package:muskaan_minigame/features/tracking/domain/mouth_state_machine.da
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import 'package:muskaan_minigame/features/tracking/data/vision_sevice_impl.dart';
 
+/// Factory boundary for the detector owned by the vision service.
+final faceDetectorFactoryProvider = Provider<FaceDetector Function()>(
+  (ref) => VisionServiceImpl.createDetector,
+);
+
 /// Provider for VisionService abstraction.
+final trackingClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
 final visionServiceProvider = Provider<VisionService>((ref) {
-  final service = VisionServiceImpl();
+  final service = VisionServiceImpl(
+    detector: ref.read(faceDetectorFactoryProvider)(),
+    clock: ref.read(trackingClockProvider),
+  );
   ref.onDispose(() => unawaited(service.dispose()));
   return service;
 });
@@ -121,6 +134,7 @@ class MouthTrackingState {
 class MouthTrackingController extends StateNotifier<MouthTrackingState> {
   final CameraService _camera;
   final VisionService _vision;
+  final DateTime Function() _clock;
   final MouthStateMachine _stateMachine;
   final FaceTrackingProcessor _trackingProcessor;
   StreamSubscription<CameraState>? _cameraSub;
@@ -146,9 +160,11 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
     required VisionService vision,
     required CalibrationConfig config,
     required Ref ref,
+    DateTime Function()? clock,
     FaceTrackingProcessor? trackingProcessor,
   }) : _camera = camera,
        _vision = vision,
+       _clock = clock ?? DateTime.now,
        _config = config,
        _stateMachine = MouthStateMachine(config: config),
        _trackingProcessor = trackingProcessor ?? FaceTrackingProcessor(),
@@ -197,20 +213,20 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
         await _camera.startStream(
           maxFps: maxFps,
           onFrame: (image) async {
-            final capturedAt = DateTime.now();
+            final capturedAt = _clock();
             final frame = await _vision.process(
               image,
               rotationDegrees: _camera.imageRotationDegrees,
             );
             if (!mounted || generation != _generation) return;
-            final processedAt = DateTime.now();
+            final processedAt = _clock();
+            final age = processedAt.difference(frame.capturedAt);
+            if (age.isNegative || age >= MouthTrackingResult.staleAfter) return;
             final tracking = _trackingProcessor.update(
               frame.observation,
               now: processedAt,
             );
-            final fresh =
-                processedAt.difference(frame.capturedAt) <
-                MouthTrackingResult.staleAfter;
+            final fresh = true;
             final usable =
                 fresh &&
                 tracking.isTracking &&
@@ -334,6 +350,7 @@ final mouthTrackingProvider =
         camera: camera,
         vision: vision,
         config: config,
+        clock: ref.read(trackingClockProvider),
         ref: ref,
       );
     });

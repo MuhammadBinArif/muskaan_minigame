@@ -162,7 +162,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 8),
                               child: Text(
-                                'Open your mouth to catch falling street food. '
+                                'Tilt your phone to move. Smile to catch falling street food. '
                                 'Build combos, avoid hot chai, and show off your biggest smile!',
                                 style: AppTypography.body,
                                 textAlign: TextAlign.center,

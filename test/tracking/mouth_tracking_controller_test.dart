@@ -103,6 +103,14 @@ class MockVisionService implements VisionService {
 
 class FakeCameraImage extends Fake implements CameraImage {}
 
+class ReusableMockCamera extends MockCameraService {
+  @override
+  Future<void> dispose() async {
+    _streaming = false;
+    _state = const CameraState.idle();
+  }
+}
+
 void main() {
   group('MouthStateMachine unit tests', () {
     late CalibrationConfig config;
@@ -305,6 +313,31 @@ void main() {
       expect(container.read(mouthTrackingProvider).isCalibrated, isFalse);
     });
 
+    test('stale and future frames cannot update face tracking', () async {
+      final controller = container.read(mouthTrackingProvider.notifier);
+      await controller.startTracking();
+      for (final timestamp in [
+        DateTime.now().subtract(const Duration(seconds: 10)),
+        DateTime.now().add(const Duration(seconds: 10)),
+      ]) {
+        mockVision.nextFrame = VisionFrame(
+          observation: FaceTrackingObservation(
+            faceDetected: true,
+            faceCount: 1,
+            facePosition: const Offset(.5, .5),
+            faceSize: .4,
+            mouthPosition: const Offset(.5, .6),
+            mouthOpenness: .2,
+            smileProbability: .9,
+            capturedAt: timestamp,
+          ),
+        );
+        await mockCamera.callback!(FakeCameraImage());
+        expect(container.read(mouthTrackingProvider).isFaceDetected, isFalse);
+        expect(container.read(mouthTrackingProvider).smileProbability, isNull);
+      }
+    });
+
     test(
       'an in-flight frame cannot update state after tracking stops',
       () async {
@@ -339,6 +372,50 @@ void main() {
       },
     );
   });
+
+  test(
+    'old camera callback cannot replace restarted tracking observation',
+    () async {
+      final camera = ReusableMockCamera();
+      final vision = MockVisionService();
+      final container = ProviderContainer(
+        overrides: [
+          cameraServiceProvider.overrideWithValue(camera),
+          visionServiceProvider.overrideWithValue(vision),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(mouthTrackingProvider.notifier);
+      VisionFrame frame(double smile) => VisionFrame(
+        observation: FaceTrackingObservation(
+          faceDetected: true,
+          faceCount: 1,
+          facePosition: const Offset(.5, .5),
+          faceSize: .4,
+          mouthPosition: const Offset(.5, .6),
+          mouthOpenness: .1,
+          smileProbability: smile,
+          capturedAt: DateTime.now(),
+        ),
+      );
+      await controller.startTracking();
+      final pending = Completer<VisionFrame>();
+      vision.pendingFrame = pending;
+      final oldResult = camera.callback!(FakeCameraImage());
+      await controller.stopTracking();
+      vision.pendingFrame = null;
+      await controller.startTracking();
+      vision.nextFrame = frame(.2);
+      await camera.callback!(FakeCameraImage());
+      expect(container.read(mouthTrackingProvider).smileProbability, .2);
+      pending.complete(frame(.9));
+      await oldResult;
+      expect(container.read(mouthTrackingProvider).smileProbability, .2);
+      vision.nextFrame = frame(.3);
+      await camera.callback!(FakeCameraImage());
+      expect(container.read(mouthTrackingProvider).smileProbability, .3);
+    },
+  );
 
   group('GameSessionNotifier continuous mouth tracking integration', () {
     test(

@@ -78,11 +78,7 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
   late final AnimationController _glow;
 
   static const List<_Feature> _features = <_Feature>[
-    _Feature(
-      emoji: '🎯',
-      title: 'Face Tracking',
-      desc: 'Open your mouth to catch food',
-    ),
+    _Feature(emoji: '🎯', title: 'Face Tracking', desc: 'Smile to catch food'),
     _Feature(
       emoji: '⚡',
       title: 'Build Combos',

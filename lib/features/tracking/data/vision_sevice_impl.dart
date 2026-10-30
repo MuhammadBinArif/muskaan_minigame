@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show Offset;
 
 import 'package:camera/camera.dart';
@@ -11,107 +12,132 @@ import '../domain/tracking_coordinates.dart';
 
 /// Real implementation backed by Google ML Kit.
 class VisionServiceImpl implements VisionService {
-  VisionServiceImpl()
-    : _detector = FaceDetector(
-        options: FaceDetectorOptions(
-          enableLandmarks: false,
-          enableContours: true,
-          enableClassification: true,
-          enableTracking: true,
-          performanceMode: FaceDetectorMode.fast,
-          minFaceSize: 0.15,
-        ),
-      );
+  VisionServiceImpl({FaceDetector? detector, DateTime Function()? clock})
+    : _detector = detector ?? createDetector(),
+      _clock = clock ?? DateTime.now;
+
+  static FaceDetector createDetector() => FaceDetector(
+    options: FaceDetectorOptions(
+      enableLandmarks: false,
+      enableContours: true,
+      enableClassification: true,
+      enableTracking: true,
+      performanceMode: FaceDetectorMode.fast,
+      minFaceSize: 0.15,
+    ),
+  );
 
   final FaceDetector _detector;
+  final DateTime Function() _clock;
+  Future<void>? _disposal;
+  int _active = 0;
+  Completer<void>? _drained;
 
   @override
   Future<VisionFrame> process(
     CameraImage image, {
     required int rotationDegrees,
   }) async {
-    final input = buildInputImage(
-      image: image,
-      rotationDegrees: rotationDegrees,
-    );
-
-    final capturedAt = DateTime.now();
-    final faces = await _detector.processImage(input);
-    if (faces.length != 1) {
-      return VisionFrame.noFace(now: capturedAt, faceCount: faces.length);
-    }
-    final face = faces.single;
-
-    // ── Head-pose sanity check ──
-    // If ML Kit populates Euler angles, verify they are within acceptable tilt.
-    // If null, we proceed with landmark extraction rather than dropping the frame.
-    final eulerX = face.headEulerAngleX;
-    final eulerY = face.headEulerAngleY;
-    if (eulerX != null && eulerY != null) {
-      if (!MouthGeometry.isHeadPoseUsable(eulerX: eulerX, eulerY: eulerY)) {
-        return VisionFrame.noFace(now: capturedAt, faceCount: 1);
-      }
-    }
-
-    final faceCenter = TrackingCoordinates.normalize(
-      x: face.boundingBox.center.dx,
-      y: face.boundingBox.center.dy,
-      imageWidth: image.width.toDouble(),
-      imageHeight: image.height.toDouble(),
-      rotationDegrees: rotationDegrees,
-      mirrored: true,
-    );
-    final faceSize = TrackingCoordinates.normalizeFaceSize(
-      faceWidth: face.boundingBox.width,
-      faceHeight: face.boundingBox.height,
-      imageWidth: image.width.toDouble(),
-      imageHeight: image.height.toDouble(),
-      rotationDegrees: rotationDegrees,
-    );
-
-    final upper = face.contours[FaceContourType.upperLipBottom]?.points;
-    final lower = face.contours[FaceContourType.lowerLipTop]?.points;
-    double? openness;
-    Offset? mouthCenter;
-    if (upper != null &&
-        lower != null &&
-        upper.isNotEmpty &&
-        lower.isNotEmpty) {
-      openness = MouthGeometry.contourOpenness(
-        upperLipBottomY: upper.map((point) => point.y.toDouble()).toList(),
-        lowerLipTopY: lower.map((point) => point.y.toDouble()).toList(),
-        faceHeightPx: face.boundingBox.height,
+    if (_disposal != null) throw StateError('Vision service is disposed');
+    _active++;
+    try {
+      final capturedAt = _clock();
+      final input = buildInputImage(
+        image: image,
+        rotationDegrees: rotationDegrees,
       );
-      final points = [...upper, ...lower];
-      final centerX =
-          points.fold<double>(0, (sum, point) => sum + point.x) / points.length;
-      final centerY =
-          points.fold<double>(0, (sum, point) => sum + point.y) / points.length;
-      final normalizedMouth = TrackingCoordinates.normalize(
-        x: centerX,
-        y: centerY,
+
+      final faces = await _detector.processImage(input);
+      if (_disposal != null) throw StateError('Vision service is disposed');
+      if (faces.length != 1) {
+        return VisionFrame.noFace(now: capturedAt, faceCount: faces.length);
+      }
+      final face = faces.single;
+
+      // ── Head-pose sanity check ──
+      // If ML Kit populates Euler angles, verify they are within acceptable tilt.
+      // If null, we proceed with landmark extraction rather than dropping the frame.
+      final eulerX = face.headEulerAngleX;
+      final eulerY = face.headEulerAngleY;
+      if (eulerX != null && eulerY != null) {
+        if (!MouthGeometry.isHeadPoseUsable(eulerX: eulerX, eulerY: eulerY)) {
+          return VisionFrame.noFace(now: capturedAt, faceCount: 1);
+        }
+      }
+
+      final faceCenter = TrackingCoordinates.normalize(
+        x: face.boundingBox.center.dx,
+        y: face.boundingBox.center.dy,
         imageWidth: image.width.toDouble(),
         imageHeight: image.height.toDouble(),
         rotationDegrees: rotationDegrees,
         mirrored: true,
       );
-      mouthCenter = Offset(normalizedMouth.x, normalizedMouth.y);
-    }
+      final faceSize = TrackingCoordinates.normalizeFaceSize(
+        faceWidth: face.boundingBox.width,
+        faceHeight: face.boundingBox.height,
+        imageWidth: image.width.toDouble(),
+        imageHeight: image.height.toDouble(),
+        rotationDegrees: rotationDegrees,
+      );
 
-    return VisionFrame(
-      observation: FaceTrackingObservation(
-        faceDetected: true,
-        faceCount: 1,
-        facePosition: Offset(faceCenter.x, faceCenter.y),
-        faceSize: faceSize,
-        mouthPosition: mouthCenter,
-        mouthOpenness: openness,
-        smileProbability: face.smilingProbability,
-        capturedAt: capturedAt,
-      ),
-    );
+      final upper = face.contours[FaceContourType.upperLipBottom]?.points;
+      final lower = face.contours[FaceContourType.lowerLipTop]?.points;
+      double? openness;
+      Offset? mouthCenter;
+      if (upper != null &&
+          lower != null &&
+          upper.isNotEmpty &&
+          lower.isNotEmpty) {
+        openness = MouthGeometry.contourOpenness(
+          upperLipBottomY: upper.map((point) => point.y.toDouble()).toList(),
+          lowerLipTopY: lower.map((point) => point.y.toDouble()).toList(),
+          faceHeightPx: face.boundingBox.height,
+        );
+        final points = [...upper, ...lower];
+        final centerX =
+            points.fold<double>(0, (sum, point) => sum + point.x) /
+            points.length;
+        final centerY =
+            points.fold<double>(0, (sum, point) => sum + point.y) /
+            points.length;
+        final normalizedMouth = TrackingCoordinates.normalize(
+          x: centerX,
+          y: centerY,
+          imageWidth: image.width.toDouble(),
+          imageHeight: image.height.toDouble(),
+          rotationDegrees: rotationDegrees,
+          mirrored: true,
+        );
+        mouthCenter = Offset(normalizedMouth.x, normalizedMouth.y);
+      }
+
+      return VisionFrame(
+        observation: FaceTrackingObservation(
+          faceDetected: true,
+          faceCount: 1,
+          facePosition: Offset(faceCenter.x, faceCenter.y),
+          faceSize: faceSize,
+          mouthPosition: mouthCenter,
+          mouthOpenness: openness,
+          smileProbability: face.smilingProbability,
+          capturedAt: capturedAt,
+        ),
+      );
+    } finally {
+      _active--;
+      if (_active == 0) _drained?.complete();
+    }
   }
 
   @override
-  Future<void> dispose() => _detector.close();
+  Future<void> dispose() => _disposal ??= _closeWhenDrained();
+
+  Future<void> _closeWhenDrained() async {
+    if (_active > 0) {
+      _drained = Completer<void>();
+      await _drained!.future;
+    }
+    await _detector.close();
+  }
 }

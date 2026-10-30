@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:camera/camera.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:muskaan_minigame/app/router/app_router.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
@@ -36,6 +37,8 @@ class NavigationFaceService implements FaceDetectionService {
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   /// Pumps the app on a portrait mobile viewport.
   /// Uses `pump(Duration)` instead of `pumpAndSettle()` because several
   /// screens (Home, Calibration, Countdown, Gameplay) run infinite
@@ -130,7 +133,7 @@ void main() {
       expect(find.byKey(const Key('onboarding-selfie-emoji')), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('NEXT'));
-      expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
+      expect(find.text('Smile to Catch'), findsOneWidget);
       expect(
         find.byKey(const Key('onboarding-open-mouth-emoji')),
         findsOneWidget,
@@ -149,11 +152,12 @@ void main() {
       expect(find.text('Position Your Face'), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('NEXT'));
-      expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
+      expect(find.text('Smile to Catch'), findsOneWidget);
 
       await tester.tap(find.byIcon(Icons.chevron_left));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
+
       expect(find.text('Position Your Face'), findsOneWidget);
 
       await tester.tap(find.byIcon(Icons.chevron_left));
@@ -563,7 +567,7 @@ void main() {
       await pumpApp(tester, '/how-to-play/step1');
 
       await tapAndAdvance(tester, find.text('NEXT'));
-      expect(find.text('Open Your Mouth to Catch'), findsOneWidget);
+      expect(find.text('Smile to Catch'), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('NEXT'));
       expect(find.text('Build Combos, Avoid Hazards'), findsOneWidget);
@@ -1079,6 +1083,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
+      await tester.tap(find.text('Use touch controls'));
+      await tester.pump();
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+
       // 2) Pause via the HUD pause button.
       await tester.tap(find.byIcon(Icons.pause).first);
       await tester.pump();
@@ -1106,6 +1116,11 @@ void main() {
 
       // The READY overlay is gone; the gameplay view is visible.
       expect(find.text('READY TO PLAY'), findsNothing);
+      await tester.tap(find.text('Use touch controls'));
+      await tester.pump();
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
       expect(find.text('FACE NOT DETECTED'), findsOneWidget);
     });
 

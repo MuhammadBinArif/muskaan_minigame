@@ -13,6 +13,10 @@ class SessionFake implements CameraSession {
   bool disposed = false;
   bool ready = false;
   bool active = false;
+  bool failStart = false;
+  int disposals = 0;
+  int streamStarts = 0;
+  int streamStops = 0;
   void Function(CameraImage)? deliver;
   @override
   dynamic get previewController => null;
@@ -31,17 +35,21 @@ class SessionFake implements CameraSession {
 
   @override
   Future<void> start(void Function(CameraImage) callback) async {
+    if (failStart) throw StateError('stream unavailable');
+    streamStarts++;
     active = true;
     deliver = callback;
   }
 
   @override
   Future<void> stop() async {
+    streamStops++;
     active = false;
   }
 
   @override
   Future<void> dispose() async {
+    disposals++;
     disposed = true;
     ready = active = false;
   }
@@ -54,6 +62,98 @@ const front = CameraDescription(
 );
 
 void main() {
+  test(
+    'dispose during restart releases candidate exactly once without starting it',
+    () async {
+      final first = SessionFake();
+      final candidate = SessionFake()..initialization = Completer<void>();
+      final created = Completer<void>();
+      var creations = 0;
+      final service = CameraServiceImpl(
+        permissionStatus: () async => PermissionStatus.granted,
+        discover: () async => [front],
+        createSession: (_) {
+          creations++;
+          if (creations == 1) return first;
+          created.complete();
+          return candidate;
+        },
+      );
+      addTearDown(service.close);
+      await service.initialize();
+      await service.startStream(onFrame: (_) {});
+      await service.dispose();
+      expect(first.disposals, 1);
+      final restart = service.initialize();
+      await created.future;
+      final dispose = service.dispose();
+      candidate.initialization!.complete();
+      await Future.wait([restart, dispose]);
+      expect(candidate.disposals, 1);
+      expect(candidate.active, isFalse);
+      expect(service.isStreaming, isFalse);
+      expect(service.state.status, CameraStatus.idle);
+      await service.dispose();
+      expect(candidate.disposals, 1);
+    },
+  );
+  test(
+    'permission denial followed by grant starts and releases one session',
+    () async {
+      var permission = PermissionStatus.denied;
+      final session = SessionFake();
+      var creations = 0;
+      final service = CameraServiceImpl(
+        permissionStatus: () async => permission,
+        requestPermission: () async => permission,
+        discover: () async => [front],
+        createSession: (_) {
+          creations++;
+          return session;
+        },
+      );
+      addTearDown(service.close);
+      await service.initialize();
+      expect(service.state.status, CameraStatus.permissionDenied);
+      expect(creations, 0);
+      permission = PermissionStatus.granted;
+      await service.initialize();
+      await service.startStream(onFrame: (_) {});
+      expect(service.isStreaming, isTrue);
+      expect(creations, 1);
+      await service.dispose();
+      await service.dispose();
+      expect(session.disposals, 1);
+      expect(session.active, isFalse);
+    },
+  );
+
+  test(
+    'stream start failure can retry without creating another session',
+    () async {
+      final session = SessionFake()..failStart = true;
+      var creations = 0;
+      final service = CameraServiceImpl(
+        permissionStatus: () async => PermissionStatus.granted,
+        discover: () async => [front],
+        createSession: (_) {
+          creations++;
+          return session;
+        },
+      );
+      addTearDown(service.close);
+      await service.initialize();
+      await service.startStream(onFrame: (_) {});
+      expect(service.state.status, CameraStatus.failed);
+      expect(service.isStreaming, isFalse);
+      session.failStart = false;
+      await service.startStream(onFrame: (_) {});
+      expect(service.state.status, CameraStatus.streaming);
+      expect(creations, 1);
+      await service.dispose();
+      expect(session.disposals, 1);
+    },
+  );
   test(
     'production service handles denial, permanent denial, and absent front camera',
     () async {

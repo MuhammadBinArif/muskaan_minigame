@@ -6,6 +6,7 @@ import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/game/presentation/flame/avatar_presentation.dart';
 import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../session_regression_test.dart' show TestClock;
 
 class AvatarRepository implements ProfileAvatarRepository {
@@ -16,6 +17,21 @@ class AvatarRepository implements ProfileAvatarRepository {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('avatar selection persists and is restored safely', () async {
+    SharedPreferences.setMockInitialValues({});
+    final first = PreferencesProfileAvatarRepository();
+    await first.selectAvatar(const ProfileAvatar('👩🏽'));
+    await first.dispose();
+    final second = PreferencesProfileAvatarRepository();
+    expect((await second.watchAvatar().first)?.symbol, '👩🏽');
+    await second.dispose();
+    SharedPreferences.setMockInitialValues({
+      PreferencesProfileAvatarRepository.key: 'invalid',
+    });
+    final invalid = PreferencesProfileAvatarRepository();
+    expect(await invalid.watchAvatar().first, isNull);
+    await invalid.dispose();
+  });
   test(
     'repository selection, live changes, missing and failed reads',
     () async {
@@ -159,6 +175,31 @@ void main() {
       avatar.setAvatar(const ProfileAvatar('🦊'));
     },
   );
+
+  test('saved avatar styles produce distinct gameplay portraits', () async {
+    final avatar = AvatarPresentation()..reducedMotion = true;
+    Future<List<int>> render(int index) async {
+      avatar.setAvatar(ProfileAvatar(ProfileAvatar.options[index]));
+      final recorder = ui.PictureRecorder();
+      avatar.render(ui.Canvas(recorder), const ui.Offset(64, 64), 50);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(128, 128);
+      final bytes =
+          (await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          ))!.buffer.asUint8List().toList();
+      image.dispose();
+      picture.dispose();
+      return bytes;
+    }
+
+    final first = await render(0);
+    final same = await render(0);
+    final different = await render(3);
+    expect(first, same);
+    expect(first, isNot(different));
+    avatar.dispose();
+  });
 
   testWidgets(
     'actual falling miss emits once without changing score or lives',

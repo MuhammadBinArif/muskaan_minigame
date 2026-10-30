@@ -49,6 +49,7 @@ dependencies:
   flame: ^1.38.2
   google_mobile_ads: ^9.1.0
   sensors_plus: ^7.1.1
+  shared_preferences: ^2.5.6
 
 dependency_overrides:
   permission_handler_android: 13.0.1

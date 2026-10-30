@@ -119,14 +119,14 @@ class _HowToPlayStep2ScreenState extends State<HowToPlayStep2Screen>
                         _buildIllustration(),
                         const SizedBox(height: 32),
                         const Text(
-                          'Open Your Mouth to Catch',
+                          'Smile to Catch',
                           style: AppTypography.heading,
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 12),
                         const Text(
-                          'When food falls toward the mouth ring, open wide '
-                          'to catch it. Each item has different points!',
+                          'Tilt your phone to move. Smile when food reaches '
+                          'the catch zone. Each item has different points!',
                           style: AppTypography.body,
                           textAlign: TextAlign.center,
                         ),

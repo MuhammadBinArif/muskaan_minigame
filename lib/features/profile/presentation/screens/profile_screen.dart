@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:muskaan_minigame/features/ads/ad_service.dart';
 import 'package:muskaan_minigame/shared/widgets/app_bottom_nav.dart';
+import '../../domain/profile_avatar.dart';
+import 'avatar_studio_screen.dart' show AvatarPainter;
 
 class _ProfileColors {
   static const page = Color(0xFF100C14);
@@ -35,12 +37,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  static const List<String> _avatarOptions = <String>[
-    '🧑🏽‍🦱',
-    '👨🏾',
-    '👩🏽',
-    '👩🏻',
-  ];
+  static const List<String> _avatarOptions = ProfileAvatar.options;
 
   late final TextEditingController _nameController;
   bool _editingName = false;
@@ -64,8 +61,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _editingName = !_editingName);
   }
 
+  Future<void> _selectAvatar(int index) async {
+    final repository = ref.read(profileAvatarRepositoryProvider);
+    if (repository is! WritableProfileAvatarRepository) return;
+    try {
+      await repository.selectAvatar(ProfileAvatar(_avatarOptions[index]));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save avatar. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final avatar = ref.watch(profileAvatarProvider).asData?.value;
+    final savedIndex = _avatarOptions.indexOf(avatar?.symbol ?? '');
+    if (savedIndex >= 0) _selectedAvatar = savedIndex;
     return Scaffold(
       backgroundColor: _ProfileColors.page,
       body: SafeArea(
@@ -431,7 +447,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   if (i > 0) const SizedBox(width: 7),
                   Expanded(
                     child: GestureDetector(
-                      onTap: () => setState(() => _selectedAvatar = i),
+                      onTap: () => _selectAvatar(i),
                       child: _AvatarPortrait(
                         symbol: _avatarOptions[i],
                         size: 61,
@@ -452,7 +468,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 onTap: () async {
                   final selected = await context.push<int>('/avatar-studio');
                   if (mounted && selected != null) {
-                    setState(() => _selectedAvatar = selected.clamp(0, 3));
+                    await _selectAvatar(selected.clamp(0, 3));
                   }
                 },
                 borderRadius: BorderRadius.circular(12),
@@ -604,10 +620,14 @@ class _AvatarPortrait extends StatelessWidget {
             width: selected ? 3 : 2,
           ),
         ),
-        child: Center(
-          child: Text(
-            symbol,
-            style: TextStyle(fontSize: size * .55, height: 1),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: ClipOval(
+            child: CustomPaint(
+              painter: AvatarPainter(
+                hairStyle: ProfileAvatar.options.indexOf(symbol).clamp(0, 3),
+              ),
+            ),
           ),
         ),
       ),

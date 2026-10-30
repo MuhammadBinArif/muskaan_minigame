@@ -40,4 +40,10 @@ class SmileTrigger {
     _candidateSince = null;
     _waitingForNeutral = false;
   }
+
+  /// Discard an interrupted gesture and require a fresh neutral observation.
+  void requireNeutral() {
+    _candidateSince = null;
+    _waitingForNeutral = true;
+  }
 }

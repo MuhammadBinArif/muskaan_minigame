@@ -13,6 +13,8 @@ import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/game/domain/face_game_control.dart';
 import 'package:muskaan_minigame/features/game/domain/tilt_movement.dart';
 import 'package:muskaan_minigame/features/game/domain/smile_trigger.dart';
+import 'package:muskaan_minigame/features/game/domain/smile_calibration.dart';
+import 'package:muskaan_minigame/features/game/data/smile_calibration_store.dart';
 import 'package:muskaan_minigame/features/game/data/tilt_sensor.dart';
 import 'package:muskaan_minigame/features/game/presentation/flame/muskaan_flame_game.dart';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
@@ -23,6 +25,15 @@ import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provide
 // GAMEPLAY PHASE — visual state derived from GameSessionState
 // ============================================================
 enum GameplayPhase { idle, catchSuccess, hazardHit, comboActive, paused }
+
+final gameplayTiltSensorProvider = Provider<TiltSensor>((ref) => TiltSensor());
+final gameplayClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+// Wraps the pending-catch request so integration tests can observe each entry.
+@visibleForTesting
+final gameplayCatchRequestHandlerProvider =
+    Provider<void Function(VoidCallback)>((ref) => (request) => request());
 
 // ============================================================
 // THEME
@@ -146,9 +157,17 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   bool _disposed = false;
   Timer? _resultTransition;
   late final ProviderSubscription<GameSessionStateData> _avatarEvents;
-  final TiltSensor _tiltSensor = TiltSensor();
+  late final TiltSensor _tiltSensor;
+  late final DateTime Function() _clock;
   final TiltMovement _tilt = TiltMovement();
-  final SmileTrigger _smile = SmileTrigger();
+  SmileTrigger _smile = SmileTrigger();
+  final SmileCalibrationStore _smileStore = SmileCalibrationStore();
+  int _smileCalibrationStage = 0;
+  int _smileCalibrationGeneration = 0;
+  final List<double> _neutralSmileSamples = [];
+  final List<double> _smileSamples = [];
+  DateTime? _lastSmileSample;
+  String? _smileCalibrationError;
   final List<double> _neutralSamples = [];
   DateTime? _sensorTime;
   DateTime? _calibrationStart;
@@ -156,6 +175,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   bool _touchMode = false;
   bool _sensorActive = false;
   bool _calibratingTilt = false;
+  bool _preparingRound = false;
+  bool _calibrationFailed = false;
+  int? _preparationCountdown;
+  Timer? _preparationTimer;
+  int _preparationGeneration = 0;
   int _sensorGeneration = 0;
   bool _catchPending = false;
   double _movementX = .5;
@@ -163,6 +187,9 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   @override
   void initState() {
     super.initState();
+    _tiltSensor = ref.read(gameplayTiltSensorProvider);
+    _clock = ref.read(gameplayClockProvider);
+    unawaited(_loadSmileCalibration());
 
     _fall = AnimationController(
       vsync: this,
@@ -224,15 +251,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       fireImmediately: true,
     );
     _lifecycle = AppLifecycleListener(
-      onPause: _pause,
-      onInactive: _pause,
-      onHide: _pause,
-      onResume: () {
-        final session = ref.read(gameSessionProvider);
-        if (session.state == GameSessionState.playing) {
-          _trackingController?.startTracking();
-        }
-      },
+      onPause: () => handleLifecycleEvent(AppLifecycleState.paused),
+      onInactive: () => handleLifecycleEvent(AppLifecycleState.inactive),
+      onHide: () => handleLifecycleEvent(AppLifecycleState.hidden),
+      onResume: () => handleLifecycleEvent(AppLifecycleState.resumed),
     );
 
     // Initialize camera tracking when entering Gameplay
@@ -246,9 +268,100 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
   MouthTrackingController? _trackingController;
 
+  @visibleForTesting
+  void handleLifecycleEvent(AppLifecycleState event) {
+    if (_disposed || !mounted) return;
+    if (event == AppLifecycleState.resumed) {
+      if (ref.read(gameSessionProvider).state == GameSessionState.playing) {
+        _trackingController?.startTracking();
+      }
+    } else if (event == AppLifecycleState.paused ||
+        event == AppLifecycleState.inactive ||
+        event == AppLifecycleState.hidden) {
+      _pause();
+    }
+  }
+
+  Future<void> _loadSmileCalibration() async {
+    try {
+      final calibration = await _smileStore.load();
+      if (!mounted ||
+          _disposed ||
+          calibration == null ||
+          _smileCalibrationStage != 0 ||
+          ref.read(gameSessionProvider).state != GameSessionState.ready) {
+        return;
+      }
+      _smile = SmileTrigger(
+        threshold: calibration.enter,
+        neutralThreshold: calibration.exit,
+      );
+    } catch (_) {
+      // Missing preferences leave the safe default thresholds in place.
+    }
+  }
+
+  void _startSmileCalibration() {
+    _smileCalibrationGeneration++;
+    setState(() {
+      _smileCalibrationStage = 1;
+      _smileCalibrationError = null;
+      _lastSmileSample = null;
+      _neutralSmileSamples.clear();
+      _smileSamples.clear();
+    });
+    unawaited(_trackingController?.startTracking());
+  }
+
+  Future<void> _finishSmileCalibration() async {
+    final generation = _smileCalibrationGeneration;
+    final calibration = SmileCalibration.fromSamples(
+      neutral: _neutralSmileSamples,
+      smile: _smileSamples,
+    );
+    if (calibration == null || !calibration.isValid) {
+      setState(() {
+        _smileCalibrationStage = 3;
+        _smileCalibrationError =
+            'Could not distinguish your smile. Try again or skip.';
+      });
+      return;
+    }
+    try {
+      await _smileStore.save(calibration);
+      if (!mounted ||
+          _disposed ||
+          _smileCalibrationStage != 2 ||
+          generation != _smileCalibrationGeneration) {
+        return;
+      }
+      _smile = SmileTrigger(
+        threshold: calibration.enter,
+        neutralThreshold: calibration.exit,
+      );
+      setState(() {
+        _smileCalibrationStage = 3;
+        _smileCalibrationError = null;
+      });
+    } catch (_) {
+      if (mounted &&
+          !_disposed &&
+          _smileCalibrationStage == 2 &&
+          generation == _smileCalibrationGeneration) {
+        setState(() {
+          _smileCalibrationStage = 3;
+          _smileCalibrationError =
+              'Could not save calibration. Try again or skip.';
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    _preparationGeneration++;
+    _preparationTimer?.cancel();
     _sensorActive = false;
     _sensorGeneration++;
     _sensorTimeout?.cancel();
@@ -283,7 +396,44 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   ) {
     if (_disposed) return;
     _trackingUi.value = next;
-    final faceReady = next.tracking.isTracking && next.smileProbability != null;
+    final probability = next.smileProbability;
+    final observedAt = next.tracking.lastDetectedAt;
+    final age = observedAt == null ? null : _clock().difference(observedAt);
+    final faceReady =
+        next.tracking.isTracking &&
+        !next.hasCameraError &&
+        next.error == null &&
+        probability != null &&
+        probability.isFinite &&
+        probability >= 0 &&
+        probability <= 1 &&
+        age != null &&
+        !age.isNegative &&
+        age < const Duration(milliseconds: 500);
+    if ((_smileCalibrationStage == 1 || _smileCalibrationStage == 2) &&
+        faceReady &&
+        observedAt != null &&
+        observedAt != _lastSmileSample &&
+        !(_clock().difference(observedAt).isNegative) &&
+        _clock().difference(observedAt) < const Duration(milliseconds: 500)) {
+      _lastSmileSample = observedAt;
+      if (_smileCalibrationStage == 1) {
+        _neutralSmileSamples.add(probability);
+        if (_neutralSmileSamples.length >= 8) {
+          setState(() => _smileCalibrationStage = 4);
+        } else {
+          setState(() {});
+        }
+      } else if (_smileSamples.length < 8) {
+        _smileSamples.add(probability);
+        if (_smileSamples.length == 8) {
+          setState(() {});
+          unawaited(_finishSmileCalibration());
+        } else {
+          setState(() {});
+        }
+      }
+    }
     if (!faceReady) {
       _smile.update(null, DateTime.now());
       _catchPending = false;
@@ -294,8 +444,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     } else if (ref.read(gameSessionProvider).state ==
             GameSessionState.playing &&
         _smile.update(next.smileProbability, next.tracking.updatedAt)) {
-      _catchPending = true;
-      _game.setMouthOpen(true);
+      ref.read(gameplayCatchRequestHandlerProvider)(() {
+        _catchPending = true;
+        _game.setMouthOpen(true);
+      });
     }
     _game.setMovementInput(_movementX, faceReady: faceReady);
 
@@ -319,6 +471,21 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   }
 
   void _pause() {
+    _smile.requireNeutral();
+    _smileCalibrationGeneration++;
+    final wasCalibratingSmile = _smileCalibrationStage != 0;
+    _smileCalibrationStage = 0;
+    _preparationGeneration++;
+    _preparationTimer?.cancel();
+    _preparationCountdown = null;
+    if (_preparingRound && mounted) {
+      setState(() {
+        _preparingRound = false;
+        _calibrationFailed = false;
+      });
+    } else if (wasCalibratingSmile && mounted) {
+      setState(() {});
+    }
     _sensorActive = false;
     _sensorGeneration++;
     _calibratingTilt = false;
@@ -345,13 +512,19 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   }
 
   Future<void> _startGame() async {
+    if (_preparingRound) return;
+    final generation = ++_preparationGeneration;
     final session = ref.read(gameSessionProvider);
     if (session.isSaving || session.saveError != null) {
       context.go('/results');
       return;
     }
+    setState(() {
+      _preparingRound = true;
+      _calibrationFailed = false;
+    });
     await ref.read(mouthTrackingProvider.notifier).startTracking();
-    if (!mounted) return;
+    if (!mounted || generation != _preparationGeneration) return;
     final tracking = ref.read(mouthTrackingProvider);
     if (tracking.isStreaming && !tracking.hasCameraError) {
       _game.configureControl(
@@ -359,8 +532,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       );
       _game.resetControl();
       _game.resumeEngine();
-      ref.read(gameSessionProvider.notifier).startGame();
-      _smile.reset();
+      _smile.requireNeutral();
       _catchPending = false;
       _movementX = .5;
       _game.setMovementInput(
@@ -368,8 +540,50 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
         faceReady:
             tracking.tracking.isTracking && tracking.smileProbability != null,
       );
-      _startSensor();
+      if (_touchMode) {
+        _beginPreparedRound();
+      } else {
+        _startSensor();
+      }
+    } else {
+      setState(() {
+        _preparingRound = false;
+      });
     }
+  }
+
+  void _beginPreparedRound() {
+    if (!_preparingRound ||
+        _disposed ||
+        !mounted ||
+        _preparationCountdown != null) {
+      return;
+    }
+    final generation = _preparationGeneration;
+    setState(() {
+      _calibrationFailed = false;
+      _preparationCountdown = 3;
+    });
+    _preparationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted ||
+          _disposed ||
+          generation != _preparationGeneration ||
+          !_preparingRound) {
+        timer.cancel();
+        return;
+      }
+      final remaining = _preparationCountdown! - 1;
+      if (remaining == 0) {
+        timer.cancel();
+        setState(() {
+          _preparingRound = false;
+          _preparationCountdown = null;
+        });
+        ref.read(gameSessionProvider.notifier).startGame();
+      } else {
+        setState(() => _preparationCountdown = remaining);
+      }
+    });
   }
 
   void _startSensor() {
@@ -383,7 +597,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       _sensorActive = false;
       unawaited(_tiltSensor.stop());
       setState(() {
-        _touchMode = true;
+        if (_preparingRound) {
+          _calibrationFailed = true;
+        } else {
+          _touchMode = true;
+        }
         _calibratingTilt = false;
       });
     });
@@ -397,10 +615,12 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
               generation != _sensorGeneration ||
               _disposed ||
               _touchMode ||
-              ref.read(gameSessionProvider).state != GameSessionState.playing) {
+              (!_preparingRound &&
+                  ref.read(gameSessionProvider).state !=
+                      GameSessionState.playing)) {
             return;
           }
-          final now = DateTime.now();
+          final now = _clock();
           _calibrationStart ??= now;
           if (now.difference(_calibrationStart!) < const Duration(seconds: 1)) {
             _neutralSamples.add(angle);
@@ -413,7 +633,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
               unawaited(_tiltSensor.stop());
               if (mounted) {
                 setState(() {
-                  _touchMode = true;
+                  if (_preparingRound) {
+                    _calibrationFailed = true;
+                  } else {
+                    _touchMode = true;
+                  }
                   _calibratingTilt = false;
                 });
               }
@@ -424,6 +648,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             _tilt.position = _movementX;
             _neutralSamples.clear();
             _sensorTime = now;
+            if (_preparingRound) _beginPreparedRound();
             return;
           }
           final previous = _sensorTime;
@@ -450,7 +675,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           _sensorTimeout?.cancel();
           unawaited(_tiltSensor.stop());
           setState(() {
-            _touchMode = true;
+            if (_preparingRound) {
+              _calibrationFailed = true;
+            } else {
+              _touchMode = true;
+            }
             _calibratingTilt = false;
           });
         },
@@ -460,7 +689,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       _sensorTimeout?.cancel();
       if (mounted) {
         setState(() {
-          _touchMode = true;
+          if (_preparingRound) {
+            _calibrationFailed = true;
+          } else {
+            _touchMode = true;
+          }
           _calibratingTilt = false;
         });
       }
@@ -605,10 +838,130 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             session.state == GameSessionState.gameOver)
           Positioned.fill(
             child: Center(
-              child: _StartOverlay(
-                onStart: _startGame,
-                onQuit: () => context.go('/home'),
-              ),
+              child:
+                  _smileCalibrationStage != 0
+                      ? Material(
+                        color: _C.cardBg,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Smile calibration improves catching sensitivity.',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                _smileCalibrationStage == 1
+                                    ? 'Relax your face.'
+                                    : _smileCalibrationStage == 2 ||
+                                        _smileCalibrationStage == 4
+                                    ? 'Now give us your natural smile.'
+                                    : _smileCalibrationError ??
+                                        'Smile calibration complete.',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              if (_smileCalibrationStage < 3)
+                                Text(
+                                  '${_smileCalibrationStage == 1 ? _neutralSmileSamples.length : _smileSamples.length} / 8',
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              if (_smileCalibrationStage == 4)
+                                TextButton(
+                                  onPressed:
+                                      () => setState(
+                                        () => _smileCalibrationStage = 2,
+                                      ),
+                                  child: const Text('Start smile sample'),
+                                ),
+                              if (_smileCalibrationError != null)
+                                TextButton(
+                                  onPressed: _startSmileCalibration,
+                                  child: const Text('Try again'),
+                                ),
+                              TextButton(
+                                onPressed:
+                                    () => setState(() {
+                                      _smileCalibrationGeneration++;
+                                      _smileCalibrationStage = 0;
+                                      _neutralSmileSamples.clear();
+                                      _smileSamples.clear();
+                                    }),
+                                child: Text(
+                                  _smileCalibrationStage == 3 &&
+                                          _smileCalibrationError == null
+                                      ? 'Continue'
+                                      : 'Skip',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      : _preparingRound
+                      ? Material(
+                        color: _C.cardBg,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _preparationCountdown != null
+                                    ? 'Controls ready! Starting in $_preparationCountdown'
+                                    : _calibrationFailed
+                                    ? 'Calibration unavailable'
+                                    : 'Hold your phone comfortably still while we calibrate movement.',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              const SizedBox(height: 16),
+                              if (!_calibrationFailed &&
+                                  _preparationCountdown == null)
+                                const CircularProgressIndicator(),
+                              if (_calibrationFailed)
+                                if (_preparationCountdown == null)
+                                  TextButton(
+                                    onPressed: () {
+                                      setState(
+                                        () => _calibrationFailed = false,
+                                      );
+                                      _startSensor();
+                                    },
+                                    child: const Text('Retry tilt'),
+                                  ),
+                              if (_preparationCountdown == null)
+                                TextButton(
+                                  onPressed: () {
+                                    _sensorActive = false;
+                                    _sensorGeneration++;
+                                    _sensorTimeout?.cancel();
+                                    unawaited(_tiltSensor.stop());
+                                    setState(() {
+                                      _touchMode = true;
+                                      _calibratingTilt = false;
+                                    });
+                                    _beginPreparedRound();
+                                  },
+                                  child: const Text('Use touch controls'),
+                                ),
+                              TextButton(
+                                onPressed: () => context.go('/home'),
+                                child: const Text('Quit'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      : _StartOverlay(
+                        onStart: _startGame,
+                        onQuit: () => context.go('/home'),
+                        onCalibrate: _startSmileCalibration,
+                      ),
             ),
           )
         else ...[
@@ -672,7 +1025,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             right: 0,
             child: Text(
               session.state == GameSessionState.playing
-                  ? 'Open your mouth wide to catch!'
+                  ? 'Tilt your phone to move. Smile to catch!'
                   : 'Tap READY to start your round',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -995,7 +1348,7 @@ class _MouthRing extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text('OPEN MOUTH', style: _T.mouthLabel),
+                Text('SMILE TO CATCH', style: _T.mouthLabel),
               ],
             ),
           ),
@@ -1182,8 +1535,13 @@ class _ItemIcon extends StatelessWidget {
 class _StartOverlay extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onQuit;
+  final VoidCallback onCalibrate;
 
-  const _StartOverlay({required this.onStart, required this.onQuit});
+  const _StartOverlay({
+    required this.onStart,
+    required this.onQuit,
+    required this.onCalibrate,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1226,6 +1584,10 @@ class _StartOverlay extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           _PrimaryBtn(label: 'READY', onTap: onStart),
+          TextButton(
+            onPressed: onCalibrate,
+            child: const Text('Calibrate smile'),
+          ),
           const SizedBox(height: 12),
           _OutlineBtn(label: 'QUIT ROUND', onTap: onQuit),
         ],
@@ -1551,7 +1913,7 @@ class _TrackingInstruction extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
       FaceGameControlStatus.tracking => (
-        'Move your face to aim · Open your mouth to catch',
+        'Tilt your phone to move · Smile to catch',
         _C.mouthGreen,
       ),
       FaceGameControlStatus.temporarilyLost => (

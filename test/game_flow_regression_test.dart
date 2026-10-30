@@ -49,6 +49,31 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('READY'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(container.read(gameSessionProvider).state, GameSessionState.ready);
+    final timeBeforeCalibration =
+        container.read(gameSessionProvider).stats.timeRemaining;
+    await tester.pump(const Duration(seconds: 2));
+    expect(container.read(gameSessionProvider).state, GameSessionState.ready);
+    expect(
+      container.read(gameSessionProvider).stats.timeRemaining,
+      timeBeforeCalibration,
+    );
+    expect(container.read(gameSessionProvider).activeFoods, isEmpty);
+    await tester.tap(find.text('Use touch controls'));
+    await tester.pump();
+    expect(container.read(gameSessionProvider).state, GameSessionState.ready);
+    for (var i = 0; i < 2; i++) {
+      await tester.pump(const Duration(seconds: 1));
+      expect(container.read(gameSessionProvider).state, GameSessionState.ready);
+      expect(
+        container.read(gameSessionProvider).stats.timeRemaining,
+        timeBeforeCalibration,
+      );
+      expect(container.read(gameSessionProvider).activeFoods, isEmpty);
+    }
+    await tester.pump(const Duration(seconds: 1));
+    expect(container.read(gameSessionProvider).state, GameSessionState.playing);
     final flame =
         tester
             .widget<GameWidget<MuskaanFlameGame>>(

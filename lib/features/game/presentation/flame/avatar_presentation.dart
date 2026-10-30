@@ -1,8 +1,11 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
+import 'package:muskaan_minigame/features/profile/presentation/screens/avatar_studio_screen.dart'
+    show AvatarPainter;
 
 enum AvatarReaction { idle, catchFood, combo, miss, gameOver }
 
@@ -16,7 +19,7 @@ class AvatarPresentation {
   double idleAge = 0;
   int _catches = 0, _hazards = 0, _misses = 0;
   GameSessionState? _state;
-  TextPainter? _portrait;
+  ui.Picture? _portrait;
   String? _symbol;
   bool _disposed = false;
   String get symbol => _symbol ?? ProfileAvatar.fallback.symbol;
@@ -54,13 +57,13 @@ class AvatarPresentation {
     if (_symbol == symbol) return;
     _symbol = symbol;
     _portrait?.dispose();
-    _portrait = TextPainter(
-      text: TextSpan(
-        text: symbol,
-        style: const TextStyle(fontSize: 72, color: Color(0xFFFFFFFF)),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final index = ProfileAvatar.options.indexOf(symbol);
+    AvatarPainter(
+      hairStyle: index < 0 ? 0 : index,
+    ).paint(canvas, const Size.square(100));
+    _portrait = recorder.endRecording();
   }
 
   void update(double dt) {
@@ -112,12 +115,10 @@ class AvatarPresentation {
       Path()
         ..addOval(Rect.fromCircle(center: Offset.zero, radius: radius * .86)),
     );
-    final fit = math.min(
-      radius * 1.42 / portrait.width,
-      radius * 1.42 / portrait.height,
-    );
+    final fit = radius * 1.72 / 100;
     canvas.scale(fit);
-    portrait.paint(canvas, Offset(-portrait.width / 2, -portrait.height / 2));
+    canvas.translate(-50, -50);
+    canvas.drawPicture(portrait);
     canvas.restore();
   }
 

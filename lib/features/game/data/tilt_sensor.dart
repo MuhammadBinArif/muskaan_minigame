@@ -6,6 +6,12 @@ import 'package:sensors_plus/sensors_plus.dart';
 /// Reports gravity-derived roll in degrees. The caller owns calibration and
 /// smoothing; stopping this service releases its sole sensor subscription.
 class TiltSensor {
+  TiltSensor({Stream<AccelerometerEvent> Function()? events})
+    : _events = events ?? _defaultEvents;
+
+  final Stream<AccelerometerEvent> Function() _events;
+  static Stream<AccelerometerEvent> _defaultEvents() =>
+      accelerometerEventStream(samplingPeriod: SensorInterval.gameInterval);
   StreamSubscription<AccelerometerEvent>? _subscription;
 
   void start({
@@ -13,9 +19,7 @@ class TiltSensor {
     required void Function(Object) onError,
   }) {
     if (_subscription != null) return;
-    _subscription = accelerometerEventStream(
-      samplingPeriod: SensorInterval.gameInterval,
-    ).listen((event) {
+    _subscription = _events().listen((event) {
       if (!event.x.isFinite || !event.y.isFinite || !event.z.isFinite) return;
       final magnitude = math.sqrt(
         event.x * event.x + event.y * event.y + event.z * event.z,

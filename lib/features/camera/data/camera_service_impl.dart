@@ -71,16 +71,19 @@ class CameraServiceImpl implements CameraService {
     Future<PermissionStatus> Function()? requestPermission,
     Future<List<CameraDescription>> Function()? discover,
     CameraSession Function(CameraDescription)? createSession,
+    DateTime Function()? clock,
   }) : _permissionStatus = permissionStatus ?? (() => Permission.camera.status),
        _requestPermission =
            requestPermission ?? (() => Permission.camera.request()),
        _discover = discover ?? availableCameras,
-       _createSession = createSession ?? PluginCameraSession.new;
+       _createSession = createSession ?? PluginCameraSession.new,
+       _clock = clock ?? DateTime.now;
 
   final Future<PermissionStatus> Function() _permissionStatus;
   final Future<PermissionStatus> Function() _requestPermission;
   final Future<List<CameraDescription>> Function() _discover;
   final CameraSession Function(CameraDescription) _createSession;
+  final DateTime Function() _clock;
   final _states = StreamController<CameraState>.broadcast();
   CameraState _state = const CameraState.idle();
   CameraSession? _session;
@@ -219,7 +222,7 @@ class CameraServiceImpl implements CameraService {
               _frameJob != null) {
             return;
           }
-          final now = DateTime.now();
+          final now = _clock();
           if (lastFrame != null && now.difference(lastFrame!) < minInterval) {
             return;
           }
@@ -261,7 +264,17 @@ class CameraServiceImpl implements CameraService {
     _acceptFrames = false;
     ++_streamGeneration;
     return _enqueue(() async {
-      if (_session?.streaming ?? false) await _session!.stop();
+      try {
+        if (_session?.streaming ?? false) await _session!.stop();
+      } catch (_) {
+        _emit(
+          const CameraState(
+            status: CameraStatus.failed,
+            errorMessage: 'Unable to stop the camera stream. Please retry.',
+          ),
+        );
+        rethrow;
+      }
       await _frameJob;
       if (_session != null) {
         _emit(const CameraState(status: CameraStatus.ready));

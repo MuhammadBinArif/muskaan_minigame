@@ -134,7 +134,7 @@ class _CameraPermissionScreenState extends ConsumerState<CameraPermissionScreen>
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 12),
                           child: Text(
-                            'We need your camera to track your mouth movements. '
+                            'We need your camera to detect your smile. '
                             'Your video stays on-device — never recorded or stored.',
                             style: AppTypography.body,
                             textAlign: TextAlign.center,
