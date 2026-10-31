@@ -221,67 +221,14 @@ class _WelcomeScreenState extends State<WelcomeScreen>
             borderRadius: BorderRadius.circular(22),
             child: Stack(
               children: [
-                // Card gradient background
+                // Forest-green HUD from the supplied painter design.
                 Positioned.fill(
                   child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [AppColors.cardBgTop, AppColors.cardBgBottom],
-                      ),
-                    ),
+                    decoration: const BoxDecoration(color: Color(0xFF192418)),
                   ),
                 ),
-
-                // ---- Dashed oval + mouth ring (center) ----
-                Center(
-                  child: SizedBox(
-                    width: 120,
-                    height: 160,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Dashed oval with pulsing glow
-                        CustomPaint(
-                          size: const Size(80, 112),
-                          painter: DashedOvalPainter(
-                            pulse: pulse,
-                            glowAlpha: 0.3 + 0.4 * pulse,
-                          ),
-                        ),
-                        // Mouth ring (bottom of oval, scales)
-                        Positioned(
-                          bottom: 12,
-                          child: Transform.scale(
-                            scale: 1.0 + 0.10 * pulse,
-                            child: Container(
-                              width: 32,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: AppColors.accentOrange.withValues(
-                                  alpha: 0.15,
-                                ),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: AppColors.accentOrange,
-                                  width: 2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.accentOrange.withValues(
-                                      alpha: 0.5 * pulse,
-                                    ),
-                                    blurRadius: 12,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                Positioned.fill(
+                  child: CustomPaint(painter: _WelcomeGuidePainter()),
                 ),
 
                 // ---- Falling 🫧 (phase 0) ----
@@ -481,6 +428,100 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       child: const Text('Skip intro', style: AppTypography.skip),
     );
   }
+}
+
+// Face-guide artwork adapted from the supplied HUD; food is animated above it.
+class _WelcomeGuidePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stadium = Rect.fromCenter(
+      center: Offset(size.width * 0.491, size.height * 0.514),
+      width: size.width * 0.526,
+      height: size.height * 0.502,
+    );
+    final outline = RRect.fromRectAndRadius(
+      stadium,
+      Radius.circular(stadium.width / 2),
+    );
+    canvas.drawRRect(
+      outline,
+      Paint()
+        ..color = const Color(0xFFD95A22).withValues(alpha: 0.26)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 26
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18),
+    );
+    canvas.drawRRect(
+      outline,
+      Paint()
+        ..color = const Color(0xFFE56728).withValues(alpha: 0.22)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 10
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+    );
+
+    final path = Path()..addRRect(outline);
+    final dashes = Path();
+    for (final metric in path.computeMetrics()) {
+      final step = metric.length / 22;
+      for (var i = 0; i < 22; i++) {
+        final start = (step * 0.22 + i * step) % metric.length;
+        final end = start + step * 0.56;
+        dashes.addPath(
+          metric.extractPath(start, math.min(end, metric.length)),
+          Offset.zero,
+        );
+        if (end > metric.length) {
+          dashes.addPath(
+            metric.extractPath(0, end - metric.length),
+            Offset.zero,
+          );
+        }
+      }
+    }
+    canvas.drawPath(
+      dashes,
+      Paint()
+        ..color = const Color(0xFF9E5327)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+
+    final mouth = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(stadium.center.dx, stadium.bottom - 24.5),
+        width: 35.5,
+        height: 21.5,
+      ),
+      const Radius.circular(10.75),
+    );
+    canvas.drawRRect(mouth, Paint()..color = const Color(0xFF1D2419));
+    canvas.drawRRect(
+      mouth,
+      Paint()
+        ..color = const Color(0xFFD65225).withValues(alpha: 0.45)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5.5
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+    canvas.drawRRect(
+      mouth,
+      Paint()
+        ..color = const Color(0xFF8E3B20)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4,
+    );
+    canvas.drawRRect(
+      mouth,
+      Paint()
+        ..color = const Color(0xFFFA6836)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _WelcomeGuidePainter oldDelegate) => false;
 }
 
 // ==========================================

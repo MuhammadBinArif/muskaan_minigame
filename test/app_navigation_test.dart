@@ -176,34 +176,29 @@ void main() {
 
       expect(find.text('Camera Access'), findsOneWidget);
       expect(find.text('CONTINUE'), findsOneWidget);
-      expect(find.text('Not now'), findsOneWidget);
+      expect(find.text('Play without camera'), findsOneWidget);
       expect(
         find.text('Video processed locally — never uploaded'),
         findsOneWidget,
       );
     });
 
-    testWidgets('CONTINUE navigates to Calibration', (tester) async {
+    testWidgets('CONTINUE bypasses obsolete mouth calibration', (tester) async {
       await pumpApp(tester, '/camera-permission');
       await tapAndAdvance(tester, find.text('CONTINUE'));
 
-      expect(find.text('Face Position'), findsOneWidget);
-      expect(find.text('Lighting'), findsOneWidget);
-      expect(find.text('Mouth Visible'), findsOneWidget);
-      expect(
-        find.text('Analyzing…'),
-        findsWidgets,
-      ); // 3 status cards start in this state
+      expect(find.text('Welcome to'), findsOneWidget);
+      expect(find.text('Mouth Visible'), findsNothing);
     });
 
-    testWidgets('Not now navigates to Camera Denied', (tester) async {
+    testWidgets('Play without camera opens touch-only gameplay', (
+      tester,
+    ) async {
       await pumpApp(tester, '/camera-permission');
 
-      await tapAndAdvance(tester, find.text('Not now'));
-
-      expect(find.text('Camera Blocked'), findsOneWidget);
-      expect(find.text('OPEN SETTINGS'), findsOneWidget);
-      expect(find.text('Try Again'), findsOneWidget);
+      await tapAndAdvance(tester, find.text('Play without camera'));
+      expect(find.text('READY TO PLAY'), findsOneWidget);
+      expect(find.text('Calibrate smile'), findsNothing);
     });
 
     testWidgets('Camera Denied screen renders correctly', (tester) async {
@@ -212,6 +207,7 @@ void main() {
       expect(find.text('Camera Blocked'), findsOneWidget);
       expect(find.text('OPEN SETTINGS'), findsOneWidget);
       expect(find.text('Try Again'), findsOneWidget);
+      expect(find.text('Play without camera'), findsOneWidget);
       expect(find.text('Open your device Settings'), findsOneWidget);
       expect(find.text('Select "Allow" and return'), findsOneWidget);
     });
@@ -223,6 +219,13 @@ void main() {
       await tapAndAdvance(tester, find.text('Try Again'));
 
       expect(find.text('Camera Access'), findsOneWidget);
+    });
+
+    testWidgets('Camera denial offers touch-only gameplay', (tester) async {
+      await pumpApp(tester, '/camera-denied');
+      await tapAndAdvance(tester, find.text('Play without camera'));
+      expect(find.text('READY TO PLAY'), findsOneWidget);
+      expect(find.text('Calibrate smile'), findsNothing);
     });
 
     testWidgets('Calibration waits for measured tracking samples', (
@@ -243,18 +246,14 @@ void main() {
       expect(find.text('Welcome to'), findsNothing);
     });
 
-    testWidgets('Camera flow waits for tracking calibration', (tester) async {
+    testWidgets('Camera flow does not require mouth-open calibration', (
+      tester,
+    ) async {
       await pumpApp(tester, '/camera-permission');
 
       await tapAndAdvance(tester, find.text('CONTINUE'));
-      expect(find.text('Face Position'), findsOneWidget);
-
-      for (int i = 0; i < 12; i++) {
-        await tester.pump(const Duration(milliseconds: 500));
-      }
-
-      expect(find.text('Face Position'), findsOneWidget);
-      expect(find.text('Welcome to'), findsNothing);
+      expect(find.text('Welcome to'), findsOneWidget);
+      expect(find.text('Now open your mouth wide and hold it'), findsNothing);
     });
   });
 
@@ -561,7 +560,7 @@ void main() {
   // END-TO-END FLOWS (verify the ordered 01 → 13 pipeline)
   // ================================================================
   group('End-to-end flows', () {
-    testWidgets('New user reaches measured tracking calibration', (
+    testWidgets('New user reaches welcome without mouth calibration', (
       tester,
     ) async {
       await pumpApp(tester, '/how-to-play/step1');
@@ -576,14 +575,8 @@ void main() {
       expect(find.text('Camera Access'), findsOneWidget);
 
       await tapAndAdvance(tester, find.text('CONTINUE'));
-      expect(find.text('Face Position'), findsOneWidget);
-
-      for (int i = 0; i < 12; i++) {
-        await tester.pump(const Duration(milliseconds: 500));
-      }
-
-      expect(find.text('Face Position'), findsOneWidget);
-      expect(find.text('Welcome to'), findsNothing);
+      expect(find.text('Welcome to'), findsOneWidget);
+      expect(find.text('Mouth Visible'), findsNothing);
     });
 
     testWidgets(

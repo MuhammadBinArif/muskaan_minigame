@@ -128,7 +128,13 @@ GoRouter createRouter({String initialLocation = '/'}) {
       GoRoute(path: '/countdown', builder: (_, _) => const CountdownScreen()),
 
       // ───── 13 – 15  Gameplay, Pause, Game Over ─────
-      GoRoute(path: '/game', builder: (_, _) => const GameplayScreen()),
+      GoRoute(
+        path: '/game',
+        builder:
+            (_, state) => GameplayScreen(
+              touchOnly: state.uri.queryParameters['control'] == 'touch',
+            ),
+      ),
       GoRoute(path: '/pause', builder: (_, _) => const PauseOverlayScreen()),
       GoRoute(
         path: '/game-over',

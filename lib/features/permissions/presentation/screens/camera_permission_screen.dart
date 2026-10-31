@@ -389,7 +389,9 @@ class _CameraPermissionScreenState extends ConsumerState<CameraPermissionScreen>
                     CameraStatus.permissionPermanentlyDenied) {
               context.go('/camera-denied');
             } else {
-              context.go('/calibration');
+              await camera.dispose();
+              if (!context.mounted) return;
+              context.go('/home-first-time');
             }
           },
           child: const Center(
@@ -405,8 +407,8 @@ class _CameraPermissionScreenState extends ConsumerState<CameraPermissionScreen>
   // ---------------------------------------------------------------------------
   Widget _buildSkipButton(BuildContext context) {
     return TextButton(
-      onPressed: () => context.go('/camera-denied'),
-      child: const Text('Not now', style: AppTypography.skipText),
+      onPressed: () => context.go('/game?control=touch'),
+      child: const Text('Play without camera', style: AppTypography.skipText),
     );
   }
 }

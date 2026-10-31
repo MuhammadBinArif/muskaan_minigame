@@ -10,6 +10,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
+import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
 import 'package:muskaan_minigame/features/game/domain/face_game_control.dart';
 import 'package:muskaan_minigame/features/game/domain/tilt_movement.dart';
 import 'package:muskaan_minigame/features/game/domain/smile_trigger.dart';
@@ -29,6 +30,16 @@ enum GameplayPhase { idle, catchSuccess, hazardHit, comboActive, paused }
 final gameplayTiltSensorProvider = Provider<TiltSensor>((ref) => TiltSensor());
 final gameplayClockProvider = Provider<DateTime Function()>(
   (ref) => DateTime.now,
+);
+final gameplaySmileCalibrationStoreProvider = Provider<SmileCalibrationStore>(
+  (ref) => SmileCalibrationStore(),
+);
+const touchCatchWindow = Duration(milliseconds: 600);
+
+/// Bounds the UI wait; native work is invalidated and drained separately.
+const smileCameraStartupTimeout = Duration(seconds: 8);
+final smileCameraStartupTimeoutProvider = Provider<Duration>(
+  (ref) => smileCameraStartupTimeout,
 );
 // Wraps the pending-catch request so integration tests can observe each entry.
 @visibleForTesting
@@ -137,7 +148,8 @@ class _T {
 // SCREEN
 // ============================================================
 class GameplayScreen extends ConsumerStatefulWidget {
-  const GameplayScreen({super.key});
+  const GameplayScreen({super.key, this.touchOnly = false});
+  final bool touchOnly;
 
   @override
   ConsumerState<GameplayScreen> createState() => _GameplayScreenState();
@@ -152,7 +164,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final MuskaanFlameGame _game;
   late final ValueNotifier<FaceGameControlStatus> _controlStatus;
   late final ValueNotifier<MouthTrackingState> _trackingUi;
-  late final ProviderSubscription<MouthTrackingState> _trackingSubscription;
+  ProviderSubscription<MouthTrackingState>? _trackingSubscription;
   GameSessionNotifier? _sessionController;
   bool _disposed = false;
   Timer? _resultTransition;
@@ -161,7 +173,12 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final DateTime Function() _clock;
   final TiltMovement _tilt = TiltMovement();
   SmileTrigger _smile = SmileTrigger();
-  final SmileCalibrationStore _smileStore = SmileCalibrationStore();
+  SmileCalibrationStore? _smileStoreValue;
+  SmileCalibrationStore get _smileStore {
+    _smileStoreValue ??= ref.read(gameplaySmileCalibrationStoreProvider);
+    return _smileStoreValue!;
+  }
+
   int _smileCalibrationStage = 0;
   int _smileCalibrationGeneration = 0;
   final List<double> _neutralSmileSamples = [];
@@ -182,14 +199,24 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   int _preparationGeneration = 0;
   int _sensorGeneration = 0;
   bool _catchPending = false;
+  Timer? _touchCatchTimer;
   double _movementX = .5;
+  late bool _touchOnly;
+  bool _switchingControl = false;
+  int _controlGeneration = 0;
+  String? _controlSwitchMessage;
+  Future<void>? _pendingCameraCleanup;
 
   @override
   void initState() {
     super.initState();
+    _touchOnly = widget.touchOnly;
     _tiltSensor = ref.read(gameplayTiltSensorProvider);
     _clock = ref.read(gameplayClockProvider);
-    unawaited(_loadSmileCalibration());
+    if (!_touchOnly) {
+      unawaited(_loadSmileCalibration());
+    }
+    _touchMode = _touchOnly;
 
     _fall = AnimationController(
       vsync: this,
@@ -208,7 +235,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
     _sessionController = ref.read(gameSessionProvider.notifier);
     _controlStatus = ValueNotifier(FaceGameControlStatus.searching);
-    _trackingUi = ValueNotifier(ref.read(mouthTrackingProvider));
+    _trackingUi = ValueNotifier(
+      _touchOnly
+          ? MouthTrackingState.initial(ref.read(calibrationConfigProvider))
+          : ref.read(mouthTrackingProvider),
+    );
     _game = MuskaanFlameGame(
       controlConfig: _faceControlConfig(ref.read(calibrationConfigProvider)),
       onControlFrame: (isOpen, isActionable, targetX) {
@@ -228,6 +259,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
               ref.read(gameSessionProvider).recentCollisions,
             )) {
           _catchPending = false;
+          _touchCatchTimer?.cancel();
           _game.setMouthOpen(false);
           ref
               .read(gameSessionProvider.notifier)
@@ -245,11 +277,13 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       (_, next) => _game.avatar.sync(next),
       fireImmediately: true,
     );
-    _trackingSubscription = ref.listenManual<MouthTrackingState>(
-      mouthTrackingProvider,
-      _onTrackingChanged,
-      fireImmediately: true,
-    );
+    if (!_touchOnly) {
+      _trackingSubscription = ref.listenManual<MouthTrackingState>(
+        mouthTrackingProvider,
+        _onTrackingChanged,
+        fireImmediately: true,
+      );
+    }
     _lifecycle = AppLifecycleListener(
       onPause: () => handleLifecycleEvent(AppLifecycleState.paused),
       onInactive: () => handleLifecycleEvent(AppLifecycleState.inactive),
@@ -259,7 +293,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
     // Initialize camera tracking when entering Gameplay
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted && !_touchOnly) {
         _trackingController = ref.read(mouthTrackingProvider.notifier);
         _trackingController?.startTracking();
       }
@@ -272,7 +306,9 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   void handleLifecycleEvent(AppLifecycleState event) {
     if (_disposed || !mounted) return;
     if (event == AppLifecycleState.resumed) {
-      if (ref.read(gameSessionProvider).state == GameSessionState.playing) {
+      if (!_touchOnly &&
+          !_switchingControl &&
+          ref.read(gameSessionProvider).state == GameSessionState.playing) {
         _trackingController?.startTracking();
       }
     } else if (event == AppLifecycleState.paused ||
@@ -360,15 +396,17 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   @override
   void dispose() {
     _disposed = true;
+    _controlGeneration++;
     _preparationGeneration++;
     _preparationTimer?.cancel();
     _sensorActive = false;
     _sensorGeneration++;
     _sensorTimeout?.cancel();
     unawaited(_tiltSensor.stop());
-    _trackingSubscription.close();
+    _trackingSubscription?.close();
     _avatarEvents.close();
     _resultTransition?.cancel();
+    _touchCatchTimer?.cancel();
     _game.avatar.dispose();
     _game.pauseEngine();
     _lifecycle.dispose();
@@ -394,7 +432,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     MouthTrackingState? previous,
     MouthTrackingState next,
   ) {
-    if (_disposed) return;
+    if (_disposed || _touchOnly || _switchingControl) return;
     _trackingUi.value = next;
     final probability = next.smileProbability;
     final observedAt = next.tracking.lastDetectedAt;
@@ -471,6 +509,44 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   }
 
   void _pause() {
+    _controlGeneration++;
+    final completeTouchAfterPause = _switchingControl && !_touchOnly;
+    final pauseGeneration = _controlGeneration;
+    if (_switchingControl) {
+      _switchingControl = false;
+      final controller = _trackingController;
+      if (controller != null && completeTouchAfterPause) {
+        final cleanup = controller.stopTracking();
+        _pendingCameraCleanup = cleanup;
+        unawaited(
+          cleanup.then<void>((_) {
+            if (!mounted ||
+                _disposed ||
+                pauseGeneration != _controlGeneration ||
+                controller.camera.state.status == CameraStatus.failed ||
+                ref.read(gameSessionProvider).state !=
+                    GameSessionState.paused) {
+              return;
+            }
+            _pendingCameraCleanup = null;
+            _trackingSubscription?.close();
+            _trackingSubscription = null;
+            _trackingController = null;
+            _trackingUi.value = MouthTrackingState.initial(
+              ref.read(calibrationConfigProvider),
+            );
+            _game.setMovementInput(_movementX, faceReady: true);
+            setState(() {
+              _touchOnly = true;
+              _touchMode = true;
+            });
+          }, onError: (Object _, StackTrace _) {}),
+        );
+      } else {
+        if (controller != null) _drainCameraInBackground(controller);
+      }
+    }
+    _touchCatchTimer?.cancel();
     _smile.requireNeutral();
     _smileCalibrationGeneration++;
     final wasCalibratingSmile = _smileCalibrationStage != 0;
@@ -496,10 +572,18 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     ref.read(gameSessionProvider.notifier).pauseGame();
     _game.pauseControl();
     _game.pauseEngine();
-    unawaited(ref.read(mouthTrackingProvider.notifier).stopTracking());
+    if (!_touchOnly && !completeTouchAfterPause) {
+      unawaited(ref.read(mouthTrackingProvider.notifier).stopTracking());
+    }
   }
 
   Future<void> _resume() async {
+    if (_pendingCameraCleanup != null) return;
+    if (_touchOnly) {
+      _game.resumeEngine();
+      ref.read(gameSessionProvider.notifier).resumeGame();
+      return;
+    }
     await ref.read(mouthTrackingProvider.notifier).startTracking();
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
@@ -523,6 +607,12 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       _preparingRound = true;
       _calibrationFailed = false;
     });
+    if (_touchOnly) {
+      _game.resumeEngine();
+      _game.setMovementInput(_movementX, faceReady: true);
+      _beginPreparedRound();
+      return;
+    }
     await ref.read(mouthTrackingProvider.notifier).startTracking();
     if (!mounted || generation != _preparationGeneration) return;
     final tracking = ref.read(mouthTrackingProvider);
@@ -660,8 +750,9 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           _game.setMovementInput(
             _movementX,
             faceReady:
+                _touchOnly ||
                 _trackingUi.value.tracking.isTracking &&
-                _trackingUi.value.smileProbability != null,
+                    _trackingUi.value.smileProbability != null,
           );
         },
         onError: (_) {
@@ -719,6 +810,147 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     );
   }
 
+  void _drainCameraInBackground(MouthTrackingController controller) {
+    final cleanup = controller.stopTracking();
+    _pendingCameraCleanup = cleanup;
+    unawaited(
+      cleanup.then<void>((_) {
+        if (identical(_pendingCameraCleanup, cleanup) &&
+            controller.camera.state.status != CameraStatus.failed) {
+          _pendingCameraCleanup = null;
+        }
+      }, onError: (Object _, StackTrace _) {}),
+    );
+  }
+
+  Future<void> _switchControl() async {
+    if (_switchingControl ||
+        _disposed ||
+        ref.read(gameSessionProvider).state != GameSessionState.playing) {
+      return;
+    }
+    if (_touchOnly && _pendingCameraCleanup != null) {
+      setState(
+        () =>
+            _controlSwitchMessage =
+                'Camera is still closing. Continue with touch and retry shortly.',
+      );
+      return;
+    }
+    final generation = ++_controlGeneration;
+    setState(() {
+      _switchingControl = true;
+      _controlSwitchMessage = null;
+    });
+    _touchCatchTimer?.cancel();
+    _catchPending = false;
+    _game.setMouthOpen(false);
+    ref
+        .read(gameSessionProvider.notifier)
+        .updateMouthTracking(isOpen: false, isActionable: true);
+    if (!_touchOnly) {
+      _sensorActive = false;
+      _sensorGeneration++;
+      _sensorTimeout?.cancel();
+      try {
+        final trackingShutdown = _trackingController?.stopTracking();
+        await _tiltSensor.stop();
+        await trackingShutdown;
+      } catch (_) {
+        if (!mounted || _disposed || generation != _controlGeneration) return;
+        setState(() {
+          _switchingControl = false;
+          _controlSwitchMessage = 'Could not stop controls. Try again.';
+        });
+        return;
+      }
+      if (!mounted || _disposed || generation != _controlGeneration) return;
+      if (_trackingController?.camera.state.status == CameraStatus.failed) {
+        setState(() {
+          _switchingControl = false;
+          _controlSwitchMessage = 'Camera could not be released. Try again.';
+        });
+        return;
+      }
+      _trackingSubscription?.close();
+      _trackingSubscription = null;
+      _trackingController = null;
+      _trackingUi.value = MouthTrackingState.initial(
+        ref.read(calibrationConfigProvider),
+      );
+      _game.setMovementInput(_movementX, faceReady: true);
+      setState(() {
+        _touchOnly = true;
+        _touchMode = true;
+        _switchingControl = false;
+      });
+      return;
+    }
+    final controller = ref.read(mouthTrackingProvider.notifier);
+    _trackingController = controller;
+    try {
+      await controller.startTracking().timeout(
+        ref.read(smileCameraStartupTimeoutProvider),
+      );
+      if (!mounted || _disposed || generation != _controlGeneration) return;
+      final tracking = ref.read(mouthTrackingProvider);
+      if (!tracking.isStreaming ||
+          tracking.hasCameraError ||
+          tracking.error != null) {
+        _drainCameraInBackground(controller);
+        setState(() {
+          _switchingControl = false;
+          _controlSwitchMessage =
+              'Camera unavailable. Continue with touch or retry Smile.';
+        });
+        return;
+      }
+      SmileCalibration? saved;
+      try {
+        saved = await _smileStore.load().timeout(smileCameraStartupTimeout);
+      } catch (_) {
+        // Invalid or unavailable storage uses safe default thresholds.
+      }
+      if (!mounted || _disposed || generation != _controlGeneration) return;
+      _smile =
+          saved == null
+              ? SmileTrigger()
+              : SmileTrigger(
+                threshold: saved.enter,
+                neutralThreshold: saved.exit,
+              );
+      _smile.requireNeutral();
+      _game.setMovementInput(_movementX, faceReady: false);
+      setState(() {
+        _touchOnly = false;
+        _switchingControl = false;
+      });
+      _trackingSubscription = ref.listenManual<MouthTrackingState>(
+        mouthTrackingProvider,
+        _onTrackingChanged,
+        fireImmediately: true,
+      );
+    } on TimeoutException {
+      // stopTracking immediately invalidates the generation; the platform
+      // operation may still complete later, so retain and drain cleanup.
+      _drainCameraInBackground(controller);
+      if (!mounted || _disposed || generation != _controlGeneration) return;
+      setState(() {
+        _switchingControl = false;
+        _controlSwitchMessage =
+            'Camera timed out. Continue with touch and retry.';
+      });
+    } catch (_) {
+      _drainCameraInBackground(controller);
+      if (!mounted || _disposed || generation != _controlGeneration) return;
+      setState(() {
+        _switchingControl = false;
+        _controlSwitchMessage =
+            'Camera unavailable. Continue with touch or retry Smile.';
+      });
+    }
+  }
+
   void _moveTouch(double delta) {
     if (!_touchMode ||
         ref.read(gameSessionProvider).state != GameSessionState.playing) {
@@ -728,9 +960,34 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     _game.setMovementInput(
       _movementX,
       faceReady:
-          _trackingUi.value.tracking.isTracking &&
-          _trackingUi.value.smileProbability != null,
+          _touchOnly ||
+          (_trackingUi.value.tracking.isTracking &&
+              _trackingUi.value.smileProbability != null),
     );
+  }
+
+  void _requestTouchCatch() {
+    if (!_touchOnly ||
+        _switchingControl ||
+        _catchPending ||
+        ref.read(gameSessionProvider).state != GameSessionState.playing) {
+      return;
+    }
+    ref.read(gameplayCatchRequestHandlerProvider)(() {
+      _catchPending = true;
+      _game.setMouthOpen(true);
+    });
+    _touchCatchTimer?.cancel();
+    _touchCatchTimer = Timer(touchCatchWindow, () {
+      if (!mounted || _disposed || !_catchPending) return;
+      _catchPending = false;
+      _game.setMouthOpen(false);
+      ref
+          .read(gameSessionProvider.notifier)
+          .updateMouthTracking(isOpen: false, isActionable: true);
+      setState(() {});
+    });
+    setState(() {});
   }
 
   @override
@@ -749,6 +1006,14 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     ref.listen<GameSessionStateData>(gameSessionProvider, (previous, next) {
       if (previous?.state != GameSessionState.gameOver &&
           next.state == GameSessionState.gameOver) {
+        if (_switchingControl) {
+          _controlGeneration++;
+          _switchingControl = false;
+          unawaited(_trackingController?.stopTracking());
+        }
+        _touchCatchTimer?.cancel();
+        _catchPending = false;
+        _game.setMouthOpen(false);
         _resultTransition?.cancel();
         _resultTransition = Timer(
           MediaQuery.disableAnimationsOf(context)
@@ -961,6 +1226,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                         onStart: _startGame,
                         onQuit: () => context.go('/home'),
                         onCalibrate: _startSmileCalibration,
+                        touchOnly: _touchOnly,
                       ),
             ),
           )
@@ -1084,7 +1350,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                   valueListenable: _trackingUi,
                   builder:
                       (context, trackingState, _) => Text(
-                        trackingState.smileProbability == null
+                        _touchOnly
+                            ? (_catchPending
+                                ? 'TOUCH ONLY · CATCH READY'
+                                : 'TOUCH ONLY · TAP CATCH')
+                            : trackingState.smileProbability == null
                             ? 'FACE NOT DETECTED'
                             : _catchPending
                             ? 'SMILE READY'
@@ -1098,6 +1368,30 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             ),
           ),
         ),
+        if (session.state == GameSessionState.playing)
+          Positioned(
+            right: 12,
+            top: MediaQuery.paddingOf(context).top + 125,
+            child: Column(
+              children: [
+                TextButton(
+                  onPressed: _switchingControl ? null : _switchControl,
+                  child: Text(
+                    _switchingControl
+                        ? 'Switching controls…'
+                        : _touchOnly
+                        ? 'Use smile (camera)'
+                        : 'Use touch-only',
+                  ),
+                ),
+                if (_controlSwitchMessage != null)
+                  Text(
+                    _controlSwitchMessage!,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+              ],
+            ),
+          ),
         if (session.state == GameSessionState.paused)
           Positioned.fill(
             child: _PauseOverlay(
@@ -1114,7 +1408,14 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             child: ValueListenableBuilder<FaceGameControlStatus>(
               valueListenable: _controlStatus,
               builder:
-                  (context, status, _) => _TrackingInstruction(status: status),
+                  (context, status, _) =>
+                      _touchOnly
+                          ? const Text(
+                            'Use arrows to move · tap CATCH',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white70),
+                          )
+                          : _TrackingInstruction(status: status),
             ),
           ),
         if (session.state == GameSessionState.playing)
@@ -1136,21 +1437,29 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                     )
                   else
                     const SizedBox(width: 48),
-                  Expanded(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: TextButton(
-                        onPressed: () => _setTouchMode(!_touchMode),
-                        child: Text(
-                          _touchMode
-                              ? 'Touch · switch to tilt'
-                              : _calibratingTilt
-                              ? 'Hold phone comfortably · switch to touch'
-                              : 'Tilt · switch to touch',
+                  if (_touchOnly)
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _requestTouchCatch,
+                        child: const Text('CATCH'),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TextButton(
+                          onPressed: () => _setTouchMode(!_touchMode),
+                          child: Text(
+                            _touchMode
+                                ? 'Touch · switch to tilt'
+                                : _calibratingTilt
+                                ? 'Hold phone comfortably · switch to touch'
+                                : 'Tilt · switch to touch',
+                          ),
                         ),
                       ),
                     ),
-                  ),
                   if (_touchMode)
                     IconButton(
                       onPressed: () => _moveTouch(.08),
@@ -1536,11 +1845,13 @@ class _StartOverlay extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onQuit;
   final VoidCallback onCalibrate;
+  final bool touchOnly;
 
   const _StartOverlay({
     required this.onStart,
     required this.onQuit,
     required this.onCalibrate,
+    required this.touchOnly,
   });
 
   @override
@@ -1584,10 +1895,11 @@ class _StartOverlay extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           _PrimaryBtn(label: 'READY', onTap: onStart),
-          TextButton(
-            onPressed: onCalibrate,
-            child: const Text('Calibrate smile'),
-          ),
+          if (!touchOnly)
+            TextButton(
+              onPressed: onCalibrate,
+              child: const Text('Calibrate smile'),
+            ),
           const SizedBox(height: 12),
           _OutlineBtn(label: 'QUIT ROUND', onTap: onQuit),
         ],
@@ -1968,67 +2280,69 @@ class _DebugOverlay extends StatelessWidget {
     return Positioned(
       left: 12,
       top: 100,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.78),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isOpen ? const Color(0xFF3DD68C) : const Color(0xFFFF7A1A),
-            width: 1.2,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isOpen ? const Color(0xFF3DD68C) : const Color(0xFFFF7A1A),
+              width: 1.2,
+            ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'DEBUG PIPELINE OVERLAY',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
-                color: Colors.white.withValues(alpha: 0.7),
-                letterSpacing: 1.2,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'DEBUG PIPELINE OVERLAY',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white.withValues(alpha: 0.7),
+                  letterSpacing: 1.2,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            _diagRow(
-              'Face Present',
-              res.faceDetected ? 'YES' : 'NO',
-              res.faceDetected ? Colors.greenAccent : Colors.redAccent,
-            ),
-            _diagRow(
-              'Raw Openness',
-              trackingState.rawOpenness.toStringAsFixed(4),
-              Colors.white,
-            ),
-            _diagRow(
-              'Smoothed',
-              transition.smoothedOpenness.toStringAsFixed(4),
-              Colors.white,
-            ),
-            _diagRow(
-              'Thresholds',
-              'C: ${config.closedBaseline.toStringAsFixed(3)} | O: ${config.openThreshold.toStringAsFixed(3)}',
-              Colors.white70,
-            ),
-            _diagRow(
-              'Mouth State',
-              isOpen ? "OPEN" : "CLOSED",
-              isOpen ? const Color(0xFF3DD68C) : Colors.orangeAccent,
-            ),
-            _diagRow(
-              'Detector FPS',
-              '${trackingState.fps.toStringAsFixed(1)} FPS',
-              Colors.cyanAccent,
-            ),
-            if (trackingState.lastEventTime != null)
+              const SizedBox(height: 4),
               _diagRow(
-                'Last Event',
-                '${DateTime.now().difference(trackingState.lastEventTime!).inSeconds}s ago',
-                Colors.yellowAccent,
+                'Face Present',
+                res.faceDetected ? 'YES' : 'NO',
+                res.faceDetected ? Colors.greenAccent : Colors.redAccent,
               ),
-          ],
+              _diagRow(
+                'Raw Openness',
+                trackingState.rawOpenness.toStringAsFixed(4),
+                Colors.white,
+              ),
+              _diagRow(
+                'Smoothed',
+                transition.smoothedOpenness.toStringAsFixed(4),
+                Colors.white,
+              ),
+              _diagRow(
+                'Thresholds',
+                'C: ${config.closedBaseline.toStringAsFixed(3)} | O: ${config.openThreshold.toStringAsFixed(3)}',
+                Colors.white70,
+              ),
+              _diagRow(
+                'Mouth State',
+                isOpen ? "OPEN" : "CLOSED",
+                isOpen ? const Color(0xFF3DD68C) : Colors.orangeAccent,
+              ),
+              _diagRow(
+                'Detector FPS',
+                '${trackingState.fps.toStringAsFixed(1)} FPS',
+                Colors.cyanAccent,
+              ),
+              if (trackingState.lastEventTime != null)
+                _diagRow(
+                  'Last Event',
+                  '${DateTime.now().difference(trackingState.lastEventTime!).inSeconds}s ago',
+                  Colors.yellowAccent,
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -9,6 +9,8 @@ class ImageFake extends Fake implements CameraImage {}
 
 class SessionFake implements CameraSession {
   Completer<void>? initialization;
+  Completer<void>? streamStartGate;
+  final streamStartEntered = Completer<void>();
   bool fail = false;
   bool disposed = false;
   bool ready = false;
@@ -35,6 +37,8 @@ class SessionFake implements CameraSession {
 
   @override
   Future<void> start(void Function(CameraImage) callback) async {
+    if (!streamStartEntered.isCompleted) streamStartEntered.complete();
+    await streamStartGate?.future;
     if (failStart) throw StateError('stream unavailable');
     streamStarts++;
     active = true;
