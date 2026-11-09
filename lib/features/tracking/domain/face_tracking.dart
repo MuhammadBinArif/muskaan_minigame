@@ -16,6 +16,7 @@ class FaceTrackingObservation {
   final double? faceSize;
   final Offset? mouthPosition;
   final double? mouthOpenness;
+  final double? smileProbability;
   final DateTime capturedAt;
 
   const FaceTrackingObservation({
@@ -25,6 +26,7 @@ class FaceTrackingObservation {
     required this.faceSize,
     required this.mouthPosition,
     required this.mouthOpenness,
+    this.smileProbability,
     required this.capturedAt,
   });
 

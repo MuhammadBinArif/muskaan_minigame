@@ -16,6 +16,7 @@ class VisionServiceImpl implements VisionService {
         options: FaceDetectorOptions(
           enableLandmarks: false,
           enableContours: true,
+          enableClassification: true,
           enableTracking: true,
           performanceMode: FaceDetectorMode.fast,
           minFaceSize: 0.15,
@@ -105,6 +106,7 @@ class VisionServiceImpl implements VisionService {
         faceSize: faceSize,
         mouthPosition: mouthCenter,
         mouthOpenness: openness,
+        smileProbability: face.smilingProbability,
         capturedAt: capturedAt,
       ),
     );

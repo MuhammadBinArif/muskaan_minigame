@@ -24,6 +24,34 @@ void main() {
     isCatch: true,
   );
 
+  test('external movement and catch request reach the gameplay callback', () {
+    (bool, bool, double)? frame;
+    final game = MuskaanFlameGame(
+      controlConfig: const FaceGameControlConfig(
+        neutralX: .5,
+        horizontalRange: .22,
+      ),
+      onControlFrame: (request, ready, x) => frame = (request, ready, x),
+      onControlStatusChanged: (_) {},
+    );
+    game.onGameResize(Vector2(400, 800));
+    game.syncSession(
+      foods: const [],
+      recentCollisions: const [],
+      isPlaying: true,
+    );
+    game.setMovementInput(.8, faceReady: true);
+    game.setMouthOpen(true);
+    game.update(.016);
+    expect(frame!.$1, isTrue);
+    expect(frame!.$2, isTrue);
+    expect(frame!.$3, closeTo(.8, .001));
+    game.setMovementInput(.8, faceReady: false);
+    game.update(.016);
+    expect(frame!.$2, isFalse);
+    game.avatar.dispose();
+  });
+
   test(
     'game renders supplied food artwork and releases its drawing cache',
     () async {

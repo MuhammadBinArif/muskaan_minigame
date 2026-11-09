@@ -1106,7 +1106,7 @@ void main() {
 
       // The READY overlay is gone; the gameplay view is visible.
       expect(find.text('READY TO PLAY'), findsNothing);
-      expect(find.text('OPEN MOUTH'), findsOneWidget);
+      expect(find.text('FACE NOT DETECTED'), findsOneWidget);
     });
 
     testWidgets('pause button opens overlay', (tester) async {
@@ -1128,7 +1128,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('GAME PAUSED'), findsNothing);
-      expect(find.text('OPEN MOUTH'), findsOneWidget);
+      expect(find.text('FACE NOT DETECTED'), findsOneWidget);
     });
 
     testWidgets('QUIT ROUND navigates to Home', (tester) async {
