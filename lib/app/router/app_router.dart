@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../features/game/domain/play_mode.dart';
+import '../../features/profile/presentation/screens/player_setup_screen.dart';
+import '../../features/profile/presentation/screens/local_leaderboard_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -45,10 +48,12 @@ import 'package:muskaan_minigame/features/share/presentation/screens/share_sheet
 // 18 – 20   Smile, Challenges, Profile
 // ────────────────────────────────────────────────────────────
 import 'package:muskaan_minigame/features/smile/presentation/screens/smile_spotlight_screen.dart';
+import 'package:muskaan_minigame/features/smile/presentation/screens/smile_analytics_screen.dart';
 import 'package:muskaan_minigame/features/challenges/presentation/screens/challenges_screen.dart';
-import 'package:muskaan_minigame/features/challenges/presentation/screens/challenge_detail_screen.dart';
 import 'package:muskaan_minigame/features/profile/presentation/screens/profile_screen.dart';
 import 'package:muskaan_minigame/features/settings/presentation/screens/settings_screen.dart';
+import 'package:muskaan_minigame/features/achievements/presentation/screens/achievements_screen.dart';
+import 'package:muskaan_minigame/features/progression/presentation/screens/player_progress_screen.dart';
 
 // ============================================================
 // PlaceholderScreen — used for unbuilt destinations
@@ -84,6 +89,14 @@ GoRouter createRouter({String initialLocation = '/'}) {
   return GoRouter(
     initialLocation: initialLocation,
     routes: [
+      GoRoute(
+        path: '/player-setup',
+        builder: (_, _) => const PlayerSetupScreen(),
+      ),
+      GoRoute(
+        path: '/leaderboard',
+        builder: (_, _) => const LocalLeaderboardScreen(),
+      ),
       // ───── 01 – 05  Onboarding ─────
       GoRoute(path: '/', builder: (_, _) => const SplashScreen()),
       GoRoute(path: '/welcome', builder: (_, _) => const WelcomeScreen()),
@@ -127,7 +140,20 @@ GoRouter createRouter({String initialLocation = '/'}) {
       GoRoute(path: '/countdown', builder: (_, _) => const CountdownScreen()),
 
       // ───── 13 – 15  Gameplay, Pause, Game Over ─────
-      GoRoute(path: '/game', builder: (_, _) => const GameplayScreen()),
+      GoRoute(
+        path: '/game',
+        builder:
+            (_, state) => Consumer(
+              builder:
+                  (_, ref, _) => GameplayScreen(
+                    key: ValueKey(state.uri.toString()),
+                    touchOnly:
+                        state.uri.queryParameters['touch'] == 'true' ||
+                        (state.uri.queryParameters['touch'] == null &&
+                            ref.read(touchOnlyModeProvider)),
+                  ),
+            ),
+      ),
       GoRoute(path: '/pause', builder: (_, _) => const PauseOverlayScreen()),
       GoRoute(
         path: '/game-over',
@@ -143,17 +169,26 @@ GoRouter createRouter({String initialLocation = '/'}) {
         path: '/filmi-smile',
         builder: (_, _) => const SmileSpotlightScreen(),
       ),
+      GoRoute(
+        path: '/smile-analytics',
+        builder: (_, _) => const SmileAnalyticsScreen(),
+      ),
 
       // ───── 19 – 20  Challenges ─────
       GoRoute(path: '/challenges', builder: (_, _) => const ChallengesScreen()),
-      GoRoute(
-        path: '/challenge-detail',
-        builder: (_, _) => const ChallengeDetailScreen(),
-      ),
+      GoRoute(path: '/challenge-detail', redirect: (_, _) => '/challenges'),
 
       // ───── Bottom-nav destinations ─────
       GoRoute(path: '/games', builder: (_, _) => const GameplayScreen()),
       GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen()),
+      GoRoute(
+        path: '/achievements',
+        builder: (_, _) => const AchievementsScreen(),
+      ),
+      GoRoute(
+        path: '/player-progress',
+        builder: (_, _) => const PlayerProgressScreen(),
+      ),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
     ],
   );
@@ -172,7 +207,7 @@ class _GameOverRouteBridge extends ConsumerWidget {
     final session = ref.watch(gameSessionProvider);
     return GameOverScreen(
       nextRoute: '/results',
-      gameRecord: session.getGameResults(),
+      gameRecord: session.completedRecord,
     );
   }
 }
@@ -186,7 +221,7 @@ class _ResultsRouteBridge extends ConsumerWidget {
     final session = ref.watch(gameSessionProvider);
     return Stack(
       children: [
-        ResultsScreen(gameRecord: session.getGameResults()),
+        ResultsScreen(gameRecord: session.completedRecord),
         if (session.isSaving || session.saveError != null)
           Positioned(
             left: 16,

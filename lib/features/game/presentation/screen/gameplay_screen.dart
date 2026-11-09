@@ -1,4 +1,7 @@
 import 'dart:async';
+import '../../domain/play_mode.dart';
+import '../../../profile/presentation/widgets/player_identity.dart';
+import '../../../profile/data/player_profile_repository.dart';
 import 'dart:math' as math;
 import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
 
@@ -123,7 +126,8 @@ class _T {
 // SCREEN
 // ============================================================
 class GameplayScreen extends ConsumerStatefulWidget {
-  const GameplayScreen({super.key});
+  const GameplayScreen({super.key, this.touchOnly = false});
+  final bool touchOnly;
 
   @override
   ConsumerState<GameplayScreen> createState() => _GameplayScreenState();
@@ -138,15 +142,17 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final MuskaanFlameGame _game;
   late final ValueNotifier<FaceGameControlStatus> _controlStatus;
   late final ValueNotifier<MouthTrackingState> _trackingUi;
-  late final ProviderSubscription<MouthTrackingState> _trackingSubscription;
+  ProviderSubscription<MouthTrackingState>? _trackingSubscription;
   GameSessionNotifier? _sessionController;
   bool _disposed = false;
   Timer? _resultTransition;
   late final ProviderSubscription<GameSessionStateData> _avatarEvents;
+  late bool _touchOnly;
 
   @override
   void initState() {
     super.initState();
+    _touchOnly = widget.touchOnly;
 
     _fall = AnimationController(
       vsync: this,
@@ -165,7 +171,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
     _sessionController = ref.read(gameSessionProvider.notifier);
     _controlStatus = ValueNotifier(FaceGameControlStatus.searching);
-    _trackingUi = ValueNotifier(ref.read(mouthTrackingProvider));
+    _trackingUi = ValueNotifier(
+      _touchOnly
+          ? MouthTrackingState.initial(ref.read(calibrationConfigProvider))
+          : ref.read(mouthTrackingProvider),
+    );
     _game = MuskaanFlameGame(
       controlConfig: _faceControlConfig(ref.read(calibrationConfigProvider)),
       onControlFrame: (isOpen, isActionable, targetX) {
@@ -185,16 +195,18 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
         }
       },
     );
+    _game.touchOnly = _touchOnly;
     _avatarEvents = ref.listenManual<GameSessionStateData>(
       gameSessionProvider,
       (_, next) => _game.avatar.sync(next),
       fireImmediately: true,
     );
-    _trackingSubscription = ref.listenManual<MouthTrackingState>(
-      mouthTrackingProvider,
-      _onTrackingChanged,
-      fireImmediately: true,
-    );
+    if (!_touchOnly)
+      _trackingSubscription = ref.listenManual<MouthTrackingState>(
+        mouthTrackingProvider,
+        _onTrackingChanged,
+        fireImmediately: true,
+      );
     _lifecycle = AppLifecycleListener(
       onPause: _pause,
       onInactive: _pause,
@@ -202,14 +214,15 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       onResume: () {
         final session = ref.read(gameSessionProvider);
         if (session.state == GameSessionState.playing) {
-          _trackingController?.startTracking();
+          if (!_touchOnly) _trackingController?.startTracking();
         }
       },
     );
 
     // Initialize camera tracking when entering Gameplay
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted) ref.read(touchOnlyModeProvider.notifier).state = _touchOnly;
+      if (mounted && !_touchOnly) {
         _trackingController = ref.read(mouthTrackingProvider.notifier);
         _trackingController?.startTracking();
       }
@@ -221,7 +234,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   @override
   void dispose() {
     _disposed = true;
-    _trackingSubscription.close();
+    _trackingSubscription?.close();
     _avatarEvents.close();
     _resultTransition?.cancel();
     _game.avatar.dispose();
@@ -251,6 +264,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   ) {
     if (_disposed) return;
     _trackingUi.value = next;
+    ref.read(gameSessionProvider.notifier).observeSmile(next.smile);
     _game.setMouthOpen(next.latestTransition.isOpen);
 
     final unavailable = next.hasCameraError || next.error != null;
@@ -283,12 +297,20 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
   void _pause() {
     ref.read(gameSessionProvider.notifier).pauseGame();
+    _game.touchPressed = false;
     _game.pauseControl();
     _game.pauseEngine();
-    unawaited(ref.read(mouthTrackingProvider.notifier).stopTracking());
+    if (!_touchOnly)
+      unawaited(ref.read(mouthTrackingProvider.notifier).stopTracking());
   }
 
   Future<void> _resume() async {
+    if (_touchOnly) {
+      _game.touchPressed = false;
+      _game.resumeEngine();
+      ref.read(gameSessionProvider.notifier).resumeGame();
+      return;
+    }
     await ref.read(mouthTrackingProvider.notifier).startTracking();
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
@@ -305,6 +327,24 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       context.go('/results');
       return;
     }
+    await ref.read(playerProfileProvider.notifier).ready;
+    if (!mounted) return;
+    if (!ref.read(playerProfileProvider).hasValue) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Player profile unavailable. Restart to retry.'),
+        ),
+      );
+      return;
+    }
+    ref.read(touchOnlyModeProvider.notifier).state = _touchOnly;
+    if (_touchOnly) {
+      _game.touchOnly = true;
+      _game.touchPressed = false;
+      _game.resumeEngine();
+      ref.read(gameSessionProvider.notifier).startGame(touchOnly: true);
+      return;
+    }
     await ref.read(mouthTrackingProvider.notifier).startTracking();
     if (!mounted) return;
     final tracking = ref.read(mouthTrackingProvider);
@@ -316,6 +356,53 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       _game.resumeEngine();
       ref.read(gameSessionProvider.notifier).startGame();
     }
+  }
+
+  Future<void> _switchInputMode(bool touchOnly) async {
+    if (_touchOnly == touchOnly) return;
+    if (touchOnly) {
+      await _trackingController?.stopTracking();
+      _trackingSubscription?.close();
+      _trackingSubscription = null;
+      if (!mounted) return;
+      setState(() {
+        _touchOnly = true;
+        _game
+          ..touchOnly = true
+          ..touchPressed = false;
+      });
+      ref.read(touchOnlyModeProvider.notifier).state = true;
+      ref.read(gameSessionProvider.notifier).recordInputMode(touchOnly: true);
+      if (ref.read(gameSessionProvider).state == GameSessionState.paused) {
+        _game.resumeEngine();
+        ref.read(gameSessionProvider.notifier).resumeGame();
+      }
+      return;
+    }
+
+    _trackingController ??= ref.read(mouthTrackingProvider.notifier);
+    _trackingSubscription ??= ref.listenManual<MouthTrackingState>(
+      mouthTrackingProvider,
+      _onTrackingChanged,
+      fireImmediately: true,
+    );
+    await _trackingController!.startTracking();
+    if (!mounted) return;
+    final tracking = ref.read(mouthTrackingProvider);
+    if (!tracking.isStreaming || tracking.hasCameraError) return;
+    setState(() {
+      _touchOnly = false;
+      _game
+        ..touchOnly = false
+        ..touchPressed = false
+        ..configureControl(
+          _faceControlConfig(ref.read(calibrationConfigProvider)),
+        )
+        ..resetControl()
+        ..resumeControl();
+    });
+    ref.read(touchOnlyModeProvider.notifier).state = false;
+    ref.read(gameSessionProvider.notifier).recordInputMode(touchOnly: false);
   }
 
   @override
@@ -362,11 +449,56 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             fit: StackFit.expand,
             children: [
               Positioned.fill(child: gameView),
+              Positioned(
+                bottom: 70,
+                left: 16,
+                right: 16,
+                child: IgnorePointer(
+                  child: Column(
+                    children: [
+                      const PlayerIdentity(),
+                      ValueListenableBuilder<MouthTrackingState>(
+                        valueListenable: _trackingUi,
+                        builder:
+                            (_, tracking, _) => Text(
+                              _touchOnly
+                                  ? 'Touch-Only · smile measurement unavailable'
+                                  : tracking.hasCameraError
+                                  ? 'Camera unavailable'
+                                  : !tracking.isStreaming
+                                  ? 'Measurement unavailable'
+                                  : !tracking.isFaceDetected
+                                  ? 'Face not detected'
+                                  : tracking.smile == null
+                                  ? 'Measurement unavailable'
+                                  : tracking
+                                          .smile!
+                                          .smoothedCalibratedIntensity ==
+                                      null
+                                  ? 'Smile intensity unavailable · calibration required'
+                                  : 'Smile Intensity ${tracking.smile!.smoothedCalibratedIntensity!.round()}%',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 12,
+                top: MediaQuery.paddingOf(context).top + 8,
+                child: TextButton.icon(
+                  onPressed: () => _switchInputMode(!_touchOnly),
+                  icon: Icon(_touchOnly ? Icons.camera_alt : Icons.touch_app),
+                  label: Text(_touchOnly ? 'Smile mode' : 'Touch mode'),
+                ),
+              ),
               ValueListenableBuilder<MouthTrackingState>(
                 valueListenable: _trackingUi,
                 builder: (context, trackingState, _) {
-                  if (!trackingState.hasCameraError &&
-                      trackingState.error == null) {
+                  if (_touchOnly ||
+                      (!trackingState.hasCameraError &&
+                          trackingState.error == null)) {
                     return const SizedBox.shrink();
                   }
                   return Positioned(
@@ -387,6 +519,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                                 style: const TextStyle(color: Colors.white),
                                 textAlign: TextAlign.center,
                               ),
+                            ),
+                            TextButton(
+                              onPressed: () => _switchInputMode(true),
+                              child: const Text('Play Touch-Only'),
                             ),
                             TextButton(
                               onPressed:
@@ -490,7 +626,9 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             right: 0,
             child: Text(
               session.state == GameSessionState.playing
-                  ? 'Open your mouth wide to catch!'
+                  ? (_touchOnly
+                      ? 'Hold to catch; drag to move'
+                      : 'Open your mouth wide to catch!')
                   : 'Tap READY to start your round',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -518,7 +656,26 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
           ),
         Positioned.fill(
           child: RepaintBoundary(
-            child: IgnorePointer(
+            child: Listener(
+              onPointerDown:
+                  _touchOnly
+                      ? (event) {
+                        _game.touchX = (event.localPosition.dx /
+                                MediaQuery.sizeOf(context).width)
+                            .clamp(.1, .9);
+                        _game.touchPressed = true;
+                      }
+                      : null,
+              onPointerMove:
+                  _touchOnly
+                      ? (event) {
+                        _game.touchX = (event.localPosition.dx /
+                                MediaQuery.sizeOf(context).width)
+                            .clamp(.1, .9);
+                      }
+                      : null,
+              onPointerUp: (_) => _game.touchPressed = false,
+              onPointerCancel: (_) => _game.touchPressed = false,
               child: GameWidget<MuskaanFlameGame>(game: _game),
             ),
           ),
@@ -549,7 +706,9 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                   valueListenable: _trackingUi,
                   builder:
                       (context, trackingState, _) => Text(
-                        trackingState.latestTransition.isOpen
+                        _touchOnly
+                            ? 'HOLD TO CATCH · DRAG TO MOVE'
+                            : trackingState.latestTransition.isOpen
                             ? 'MOUTH OPEN'
                             : 'OPEN MOUTH',
                         style: _T.mouthLabel.copyWith(
@@ -580,10 +739,15 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             child: ValueListenableBuilder<FaceGameControlStatus>(
               valueListenable: _controlStatus,
               builder:
-                  (context, status, _) => _TrackingInstruction(status: status),
+                  (context, status, _) =>
+                      _touchOnly
+                          ? const Center(
+                            child: Text('Hold to catch; drag to move'),
+                          )
+                          : _TrackingInstruction(status: status),
             ),
           ),
-        if (!kReleaseMode)
+        if (!kReleaseMode && !_touchOnly)
           ValueListenableBuilder<MouthTrackingState>(
             valueListenable: _trackingUi,
             builder:

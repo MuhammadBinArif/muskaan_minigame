@@ -7,9 +7,13 @@
 // - Handling database errors gracefully
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:drift/drift.dart' show QueryRow, Variable;
 
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/game_database.dart';
+import 'package:muskaan_minigame/features/smile/domain/player_smile_analytics.dart';
+
+enum SmileHistoryOrder { newestFirst, oldestFirst }
 
 /// Interface for the records repository.
 abstract class GameRecordsRepository {
@@ -20,6 +24,14 @@ abstract class GameRecordsRepository {
   Future<void> updateSessionCompletion(GameSessionRecord record);
   Future<void> clearAllSessions();
   Future<List<GameSessionRecord>> getSessionsSince(DateTime date);
+  Future<List<HistoricalSmileRound>> getPlayerSmileHistory({
+    required String playerId,
+    int limit = 50,
+    int offset = 0,
+    DateTime? completedFrom,
+    DateTime? completedThrough,
+    SmileHistoryOrder order = SmileHistoryOrder.newestFirst,
+  });
   Stream<List<GameSessionRecord>> watchAllSessions();
 }
 
@@ -32,7 +44,52 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   @override
   Future<void> saveSession(GameSessionRecord record) async {
     try {
-      await _database.upsertSession(record);
+      if (record.playerId == null ||
+          record.playerName == null ||
+          record.playerAvatar == null) {
+        throw const FormatException(
+          'Newly persisted results require player ownership.',
+        );
+      }
+      await _database.transaction(() async {
+        final insertedId = await _database.upsertSession(record);
+        final resultId = record.id == 0 ? insertedId : record.id;
+        await _database.customStatement(
+          'UPDATE game_records SET player_id = ? WHERE id = ?',
+          [record.playerId, resultId],
+        );
+        await _database.customStatement(
+          'INSERT INTO session_details(session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET display_name=excluded.display_name, avatar=excluded.avatar, smile_samples=excluded.smile_samples, smile_average=excluded.smile_average, smile_peak=excluded.smile_peak, calibrated_smile_attempted=excluded.calibrated_smile_attempted, calibrated_smile_samples=excluded.calibrated_smile_samples, calibrated_smile_average=excluded.calibrated_smile_average, calibrated_smile_peak=excluded.calibrated_smile_peak, calibrated_smile_span_ms=excluded.calibrated_smile_span_ms, used_smile_mode=excluded.used_smile_mode, used_touch_mode=excluded.used_touch_mode, completion_timezone_offset_minutes=excluded.completion_timezone_offset_minutes',
+          [
+            resultId,
+            record.playerName,
+            record.playerAvatar,
+            record.smileSampleCount,
+            record.averageSmileProbability,
+            record.peakSmileProbability,
+            record.calibratedSmileAttempted == null
+                ? null
+                : record.calibratedSmileAttempted!
+                ? 1
+                : 0,
+            record.calibratedSmileSampleCount,
+            record.averageCalibratedSmileIntensity,
+            record.peakCalibratedSmileIntensity,
+            record.calibratedSmileObservationSpanMs,
+            record.usedSmileMode == null
+                ? null
+                : record.usedSmileMode!
+                ? 1
+                : 0,
+            record.usedTouchMode == null
+                ? null
+                : record.usedTouchMode!
+                ? 1
+                : 0,
+            record.completionTimezoneOffsetMinutes,
+          ],
+        );
+      });
     } catch (e, st) {
       throw GameRepositoryException('Failed to save game session.', e, st);
     }
@@ -42,7 +99,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   Future<List<GameSessionRecord>> getAllSessions() async {
     try {
       final records = await _database.getCompletedSessions();
-      return records.map(_toDomainRecord).toList();
+      return await _toDomainRecords(records);
     } catch (e, st) {
       throw GameRepositoryException('Failed to get sessions.', e, st);
     }
@@ -52,7 +109,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   Future<GameSessionRecord?> getBestSession() async {
     try {
       final record = await _database.getBestSession();
-      return record == null ? null : _toDomainRecord(record);
+      return record == null ? null : await _toDomainRecord(record);
     } catch (e, st) {
       throw GameRepositoryException('Failed to get best session.', e, st);
     }
@@ -62,7 +119,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   Future<GameSessionRecord?> getSessionById(int sessionId) async {
     try {
       final record = await _database.getSessionById(sessionId);
-      return record == null ? null : _toDomainRecord(record);
+      return record == null ? null : await _toDomainRecord(record);
     } catch (e, st) {
       throw GameRepositoryException('Failed to get session by ID.', e, st);
     }
@@ -71,7 +128,7 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   @override
   Future<void> updateSessionCompletion(GameSessionRecord record) async {
     try {
-      await _database.updateSession(record);
+      await saveSession(record);
     } catch (e, st) {
       throw GameRepositoryException(
         'Failed to update session completion.',
@@ -84,7 +141,10 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   @override
   Future<void> clearAllSessions() async {
     try {
-      await _database.clearAllSessions();
+      await _database.transaction(() async {
+        await _database.customStatement('DELETE FROM session_details');
+        await _database.clearAllSessions();
+      });
     } catch (e, st) {
       throw GameRepositoryException('Failed to clear sessions.', e, st);
     }
@@ -105,10 +165,95 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   }
 
   @override
+  Future<List<HistoricalSmileRound>> getPlayerSmileHistory({
+    required String playerId,
+    int limit = 50,
+    int offset = 0,
+    DateTime? completedFrom,
+    DateTime? completedThrough,
+    SmileHistoryOrder order = SmileHistoryOrder.newestFirst,
+  }) async {
+    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(playerId)) {
+      throw const FormatException('A valid stable player ID is required.');
+    }
+    if (limit < 1 || limit > 100 || offset < 0) {
+      throw RangeError('History limit must be 1–100 and offset non-negative.');
+    }
+    if (completedFrom != null &&
+        completedThrough != null &&
+        completedFrom.isAfter(completedThrough)) {
+      throw const FormatException('Invalid completion date range.');
+    }
+    try {
+      final conditions = <String>[
+        'r.player_id = ?',
+        'r.state = ?',
+        'r.ended_at IS NOT NULL',
+        'd.calibrated_smile_attempted = 1',
+        'd.calibrated_smile_samples > 0',
+        'd.calibrated_smile_average IS NOT NULL',
+        'd.calibrated_smile_peak IS NOT NULL',
+        'd.calibrated_smile_span_ms IS NOT NULL',
+      ];
+      final variables = <Variable<Object>>[
+        Variable<String>(playerId),
+        Variable<int>(SessionState.completed.index),
+      ];
+      if (completedFrom != null) {
+        conditions.add('r.ended_at >= ?');
+        variables.add(Variable<DateTime>(completedFrom));
+      }
+      if (completedThrough != null) {
+        conditions.add('r.ended_at <= ?');
+        variables.add(Variable<DateTime>(completedThrough));
+      }
+      variables
+        ..add(Variable<int>(limit))
+        ..add(Variable<int>(offset));
+      final direction = order == SmileHistoryOrder.newestFirst ? 'DESC' : 'ASC';
+      final rows =
+          await _database
+              .customSelect(
+                'SELECT r.id, r.player_id, r.ended_at, d.calibrated_smile_samples, d.calibrated_smile_average, d.calibrated_smile_peak, d.calibrated_smile_span_ms FROM game_records r INNER JOIN session_details d ON d.session_id = r.id WHERE ${conditions.join(' AND ')} ORDER BY r.ended_at $direction, r.id $direction LIMIT ? OFFSET ?',
+                variables: variables,
+              )
+              .get();
+      return rows
+          .map((row) {
+            final round = HistoricalSmileRound(
+              resultId: row.read<int>('id'),
+              playerId: row.read<String>('player_id'),
+              averageIntensity: row.read<double>('calibrated_smile_average'),
+              peakIntensity: row.read<double>('calibrated_smile_peak'),
+              validObservationCount: row.read<int>('calibrated_smile_samples'),
+              observedSpan: Duration(
+                milliseconds: row.read<int>('calibrated_smile_span_ms'),
+              ),
+              completedAt: row.read<DateTime>('ended_at'),
+            );
+            if (!round.isValid) {
+              throw const FormatException(
+                'Invalid persisted smile measurement.',
+              );
+            }
+            return round;
+          })
+          .toList(growable: false);
+    } catch (e, st) {
+      if (e is FormatException || e is RangeError) rethrow;
+      throw GameRepositoryException(
+        'Failed to get player smile history.',
+        e,
+        st,
+      );
+    }
+  }
+
+  @override
   Stream<List<GameSessionRecord>> watchAllSessions() {
     return _database
         .getAllSessionsStream()
-        .map((records) => records.map(_toDomainRecord).toList())
+        .asyncMap(_toDomainRecords)
         .handleError((Object error, StackTrace stack) {
           throw GameRepositoryException(
             'Unable to load game history.',
@@ -119,8 +264,94 @@ class GameRecordsRepositoryImpl implements GameRecordsRepository {
   }
 
   // ── Private ────────────────────────────────────────────────
-  GameSessionRecord _toDomainRecord(GameRecord row) {
+  Future<List<GameSessionRecord>> _toDomainRecords(
+    List<GameRecord> rows,
+  ) async {
+    if (rows.isEmpty) return [];
+    final details =
+        await _database.customSelect('SELECT * FROM session_details').get();
+    final ownership =
+        await _database
+            .customSelect('SELECT id, player_id FROM game_records')
+            .get();
+    final byId = {
+      for (final detail in details) detail.read<int>('session_id'): detail,
+    };
+    final ownerById = {
+      for (final row in ownership)
+        row.read<int>('id'): row.readNullable<String>('player_id'),
+    };
+    return Future.wait(
+      rows.map(
+        (row) => _toDomainRecord(
+          row,
+          metadata: byId[row.id],
+          playerId: ownerById[row.id],
+          fetchMetadata: false,
+        ),
+      ),
+    );
+  }
+
+  Future<GameSessionRecord> _toDomainRecord(
+    GameRecord row, {
+    QueryRow? metadata,
+    String? playerId,
+    bool fetchMetadata = true,
+  }) async {
+    final details =
+        fetchMetadata
+            ? await _database
+                .customSelect(
+                  'SELECT * FROM session_details WHERE session_id = ?',
+                  variables: [Variable.withInt(row.id)],
+                )
+                .getSingleOrNull()
+            : metadata;
+    final owner =
+        fetchMetadata
+            ? await _database
+                .customSelect(
+                  'SELECT player_id FROM game_records WHERE id = ?',
+                  variables: [Variable.withInt(row.id)],
+                )
+                .getSingleOrNull()
+            : null;
     final record = GameSessionRecord(
+      playerId:
+          fetchMetadata ? owner?.readNullable<String>('player_id') : playerId,
+      playerName: details?.readNullable<String>('display_name'),
+      playerAvatar: details?.readNullable<String>('avatar'),
+      smileSampleCount: details?.read<int>('smile_samples') ?? 0,
+      averageSmileProbability: details?.readNullable<double>('smile_average'),
+      peakSmileProbability: details?.readNullable<double>('smile_peak'),
+      calibratedSmileAttempted:
+          details?.readNullable<int>('calibrated_smile_attempted') == null
+              ? null
+              : details!.read<int>('calibrated_smile_attempted') == 1,
+      calibratedSmileSampleCount: details?.readNullable<int>(
+        'calibrated_smile_samples',
+      ),
+      averageCalibratedSmileIntensity: details?.readNullable<double>(
+        'calibrated_smile_average',
+      ),
+      peakCalibratedSmileIntensity: details?.readNullable<double>(
+        'calibrated_smile_peak',
+      ),
+      calibratedSmileObservationSpanMs: details?.readNullable<int>(
+        'calibrated_smile_span_ms',
+      ),
+      usedSmileMode:
+          details?.readNullable<int>('used_smile_mode') == null
+              ? null
+              : details!.read<int>('used_smile_mode') == 1,
+      usedTouchMode:
+          details?.readNullable<int>('used_touch_mode') == null
+              ? null
+              : details!.read<int>('used_touch_mode') == 1,
+      completionTimezoneOffsetMinutes: details?.readNullable<int>(
+        'completion_timezone_offset_minutes',
+      ),
       id: row.id,
       score: row.score,
       livesLost: row.livesLost,

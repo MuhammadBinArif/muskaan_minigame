@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:muskaan_minigame/features/profile/presentation/widgets/player_identity.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/domain/game_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
+import 'package:muskaan_minigame/features/achievements/application/achievement_service.dart';
+import 'package:muskaan_minigame/features/achievements/domain/player_achievement.dart';
 import 'package:muskaan_minigame/features/ads/ad_service.dart';
 import '../../../../shared/widgets/app_bottom_nav.dart';
 
@@ -103,6 +106,7 @@ class ResultsScreen extends ConsumerStatefulWidget {
 class _ResultsScreenState extends ConsumerState<ResultsScreen>
     with WidgetsBindingObserver {
   bool _replayStarted = false;
+  bool _unlockScheduled = false;
 
   @override
   void initState() {
@@ -124,6 +128,48 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen>
   @override
   Widget build(BuildContext context) {
     final record = widget.gameRecord ?? _emptyRecord();
+    ref.listen<List<AchievementUnlock>>(latestAchievementUnlocksProvider, (
+      _,
+      unlocks,
+    ) {
+      final owned =
+          unlocks
+              .where((unlock) => unlock.playerId == record.playerId)
+              .toList();
+      if (owned.isEmpty || _unlockScheduled) return;
+      _unlockScheduled = true;
+      ref.read(latestAchievementUnlocksProvider.notifier).state = const [];
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        final definition = achievementDefinitions.firstWhere(
+          (item) => item.id == owned.first.achievementId,
+        );
+        await showDialog<void>(
+          context: context,
+          builder:
+              (context) => AlertDialog(
+                key: const Key('achievement-unlock-dialog'),
+                icon: Text(
+                  definition.badge,
+                  style: const TextStyle(fontSize: 42),
+                ),
+                title: const Text('Achievement unlocked!'),
+                content: Text(
+                  owned.length == 1
+                      ? '${definition.title}\n${definition.description}'
+                      : '${definition.title} and ${owned.length - 1} more badges earned.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Continue'),
+                  ),
+                ],
+              ),
+        );
+        _unlockScheduled = false;
+      });
+    });
 
     return Scaffold(
       backgroundColor: AppColors.backgroundBottom,
@@ -174,14 +220,21 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen>
   }
 
   static GameSessionRecord _emptyRecord() {
-    return GameSessionRecord.create().complete(
-      finalScore: 0,
-      finalLivesLost: 0,
+    // Presentation-only unavailable state. New rounds must use create(),
+    // which requires ownership.
+    return GameSessionRecord(
+      id: 0,
+      score: 0,
+      livesLost: 0,
+      maxLives: 3,
       timePlayed: 0,
-      finalBestCombo: 0,
-      finalCatches: 0,
-      finalAccuracy: 0.0,
-      finalSmileScore: 0,
+      bestCombo: 0,
+      catches: 0,
+      accuracy: 0,
+      smileScore: 0,
+      startedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      state: GameSessionState.results,
+      isNewBest: false,
     );
   }
 }
@@ -283,6 +336,7 @@ class _ResultsBodyState extends State<_ResultsBody>
         ),
         Column(
           children: [
+            PlayerIdentity(record: widget.record),
             const Text('SESSION COMPLETE', style: AppTypography.sessionLabel),
             const SizedBox(height: 8),
             AnimatedBuilder(
@@ -401,7 +455,7 @@ class _ResultsBodyState extends State<_ResultsBody>
             ],
           ),
           const SizedBox(height: 12),
-          _buildSmileRow(r.smileScore),
+          _buildSmileMeasurements(r),
         ],
       ),
     );
@@ -435,7 +489,15 @@ class _ResultsBodyState extends State<_ResultsBody>
     );
   }
 
-  Widget _buildSmileRow(int smileScore) {
+  Widget _buildSmileMeasurements(GameSessionRecord record) {
+    final historical = record.calibratedSmileAttempted == null;
+    final hasSamples = (record.calibratedSmileSampleCount ?? 0) > 0;
+    final unavailableMessage =
+        historical
+            ? 'Calibrated measurements were not recorded for this result.'
+            : record.calibratedSmileAttempted == false
+            ? 'No smile measurements were collected in this round.'
+            : 'Smile calibration or valid observations were unavailable.';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
@@ -443,24 +505,48 @@ class _ResultsBodyState extends State<_ResultsBody>
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.smileRowBorder, width: 1),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('😁', style: TextStyle(fontSize: 18, height: 1.0)),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text('Smile Score', style: AppTypography.smileLabel),
+          const Semantics(
+            header: true,
+            child: Text('Smile Measurements', style: AppTypography.smileLabel),
           ),
-          Text('$smileScore%', style: AppTypography.smileValue),
-          const SizedBox(width: 4),
-          const Icon(
-            Icons.chevron_right,
-            size: 18,
-            color: AppColors.accentGold,
-          ),
+          const SizedBox(height: 8),
+          if (!hasSamples)
+            Text(unavailableMessage, style: AppTypography.statLabel)
+          else ...[
+            _measurementLine(
+              'Average Smile Intensity',
+              '${record.averageCalibratedSmileIntensity!.round()}%',
+            ),
+            _measurementLine(
+              'Peak Smile Intensity',
+              '${record.peakCalibratedSmileIntensity!.round()}%',
+            ),
+            _measurementLine(
+              'Valid observations',
+              '${record.calibratedSmileSampleCount}',
+            ),
+            _measurementLine(
+              'Observation span',
+              '${record.calibratedSmileObservationSpanMs ?? 0} ms',
+            ),
+          ],
         ],
       ),
     );
   }
+
+  Widget _measurementLine(String label, String value) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Row(
+      children: [
+        Expanded(child: Text(label, style: AppTypography.statLabel)),
+        Text(value, style: AppTypography.smileValue),
+      ],
+    ),
+  );
 
   // ── Actions ────────────────────────────────────────────────
   Widget _buildPrimaryButton(BuildContext context) {

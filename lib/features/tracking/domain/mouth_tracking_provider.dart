@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../smile/domain/smile_measurement.dart';
 import 'dart:ui' show Offset;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -25,8 +26,15 @@ final calibrationConfigProvider = StateProvider<CalibrationConfig>(
   (ref) => CalibrationConfig.defaults(),
 );
 
+/// Optional genuine ML Kit probability references. The existing mouth-opening
+/// calibration is intentionally not reused as smile-probability calibration.
+final smileCalibrationProvider = StateProvider<SmileCalibration?>(
+  (ref) => null,
+);
+
 /// Combined mouth tracking state.
 class MouthTrackingState {
+  final SmileMeasurement? smile;
   final MouthTrackingResult latestResult;
   final MouthTransition latestTransition;
   final StableFaceTracking tracking;
@@ -41,6 +49,7 @@ class MouthTrackingState {
   final DateTime? lastEventTime;
 
   const MouthTrackingState({
+    this.smile,
     required this.latestResult,
     required this.latestTransition,
     required this.tracking,
@@ -78,6 +87,8 @@ class MouthTrackingState {
       );
 
   MouthTrackingState copyWith({
+    SmileMeasurement? smile,
+    bool clearSmile = false,
     MouthTrackingResult? latestResult,
     MouthTransition? latestTransition,
     StableFaceTracking? tracking,
@@ -93,6 +104,7 @@ class MouthTrackingState {
     double? rawOpenness,
     DateTime? lastEventTime,
   }) => MouthTrackingState(
+    smile: clearSmile ? null : smile ?? this.smile,
     latestResult: latestResult ?? this.latestResult,
     latestTransition: latestTransition ?? this.latestTransition,
     tracking: tracking ?? this.tracking,
@@ -111,6 +123,8 @@ class MouthTrackingState {
 
 /// Controller that binds CameraService + VisionService + MouthStateMachine.
 class MouthTrackingController extends StateNotifier<MouthTrackingState> {
+  final SmileMeasurementEngine _smileEngine;
+  Timer? _smileExpiry;
   final CameraService _camera;
   final VisionService _vision;
   final MouthStateMachine _stateMachine;
@@ -138,8 +152,10 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
     required VisionService vision,
     required CalibrationConfig config,
     required Ref ref,
+    SmileCalibration? smileCalibration,
     FaceTrackingProcessor? trackingProcessor,
-  }) : _camera = camera,
+  }) : _smileEngine = SmileMeasurementEngine(calibration: smileCalibration),
+       _camera = camera,
        _vision = vision,
        _config = config,
        _stateMachine = MouthStateMachine(config: config),
@@ -147,7 +163,10 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
        super(MouthTrackingState.initial(config)) {
     _cameraSub = _camera.stateStream.listen((camState) {
       if (mounted) {
+        if (camState.status != CameraStatus.streaming)
+          _smileEngine.invalidate();
         state = state.copyWith(
+          clearSmile: camState.status != CameraStatus.streaming,
           cameraStatus: camState.status,
           cameraController: _camera.controller,
           clearController: _camera.controller == null,
@@ -174,7 +193,9 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
           await _camera.dispose();
         }
         if (!mounted || generation != _generation) return;
-        state = state.copyWith(clearError: true);
+        _smileEngine.reset();
+        _smileExpiry?.cancel();
+        state = state.copyWith(clearError: true, clearSmile: true);
         await _camera.initialize();
         if (!mounted || generation != _generation) return;
         state = state.copyWith(
@@ -190,12 +211,28 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
           maxFps: maxFps,
           onFrame: (image) async {
             final capturedAt = DateTime.now();
-            final frame = await _vision.process(
+            final frame = (await _vision.process(
               image,
               rotationDegrees: _camera.imageRotationDegrees,
-            );
+            )).capturedAtTime(capturedAt);
             if (!mounted || generation != _generation) return;
             final processedAt = DateTime.now();
+            final smile = _smileEngine.observe(
+              frame.observation.smileProbability,
+              capturedAt: frame.capturedAt,
+              now: processedAt,
+              reliable: frame.observation.isUsable,
+            );
+            if (smile != null) {
+              _smileExpiry?.cancel();
+              _smileExpiry = Timer(
+                _smileEngine.maxAge - processedAt.difference(smile.capturedAt),
+                () {
+                  _smileEngine.invalidate();
+                  if (mounted) state = state.copyWith(clearSmile: true);
+                },
+              );
+            }
             final tracking = _trackingProcessor.update(
               frame.observation,
               now: processedAt,
@@ -243,6 +280,8 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
                 tracking.position ??
                 const Offset(0.5, 0.5);
             state = state.copyWith(
+              smile: smile,
+              clearSmile: _smileEngine.current == null,
               latestResult: MouthTrackingResult(
                 normalizedPosition: position,
                 openness: normalizedOpenness,
@@ -269,6 +308,7 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
       } catch (error) {
         if (mounted && generation == _generation) {
           state = state.copyWith(
+            clearSmile: true,
             error: 'Unable to track mouth movement. Please recalibrate.',
             isStreaming: false,
           );
@@ -279,6 +319,11 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
 
   /// Invalidate pending frames immediately, then release the device camera.
   Future<void> stopTracking() {
+    _smileExpiry?.cancel();
+    _smileEngine.reset();
+    scheduleMicrotask(() {
+      if (mounted) state = state.copyWith(clearSmile: true, isStreaming: false);
+    });
     ++_generation;
     // Cancel an in-flight initialization now rather than after it finishes.
     final release = _camera.dispose();
@@ -300,6 +345,8 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
 
   @override
   void dispose() {
+    _smileExpiry?.cancel();
+    _smileEngine.reset();
     ++_generation;
     unawaited(_cameraSub?.cancel());
     unawaited(_camera.dispose());
@@ -313,11 +360,13 @@ final mouthTrackingProvider =
       final camera = ref.watch(cameraServiceProvider);
       final vision = ref.watch(visionServiceProvider);
       final config = ref.read(calibrationConfigProvider);
+      final smileCalibration = ref.watch(smileCalibrationProvider);
 
       return MouthTrackingController(
         camera: camera,
         vision: vision,
         config: config,
         ref: ref,
+        smileCalibration: smileCalibration,
       );
     });

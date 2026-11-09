@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import '../support/player_fixture.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_state.dart';
@@ -344,7 +345,7 @@ void main() {
     test(
       'open mouth catches edible food in mouth zone and increases score and combo',
       () {
-        final notifier = GameSessionNotifier();
+        final notifier = GameSessionNotifier(profile: createTestPlayer);
         addTearDown(notifier.dispose);
         notifier.startGame();
 
@@ -382,7 +383,7 @@ void main() {
     test(
       'open mouth catching hot tea hazard costs a life and resets combo',
       () {
-        final notifier = GameSessionNotifier();
+        final notifier = GameSessionNotifier(profile: createTestPlayer);
         addTearDown(notifier.dispose);
         notifier.startGame();
 
@@ -421,7 +422,7 @@ void main() {
     );
 
     test('closed mouth does not catch food in mouth zone', () {
-      final notifier = GameSessionNotifier();
+      final notifier = GameSessionNotifier(profile: createTestPlayer);
       addTearDown(notifier.dispose);
       notifier.startGame();
 
@@ -448,7 +449,7 @@ void main() {
     });
 
     test('non-actionable or invalid tracking is safely ignored', () {
-      final notifier = GameSessionNotifier();
+      final notifier = GameSessionNotifier(profile: createTestPlayer);
       addTearDown(notifier.dispose);
       notifier.startGame();
 

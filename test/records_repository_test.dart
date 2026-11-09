@@ -6,6 +6,7 @@ import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/game_database.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
 import 'package:sqlite3/open.dart';
+import 'support/player_fixture.dart';
 
 void main() {
   late GameDatabase db;
@@ -30,8 +31,31 @@ void main() {
   });
 
   group('GameRecordsRepository & Database tests', () {
+    test('new persistence rejects missing ownership', () async {
+      final unowned = GameSessionRecord(
+        id: 1,
+        score: 0,
+        livesLost: 0,
+        maxLives: 3,
+        timePlayed: 0,
+        bestCombo: 0,
+        catches: 0,
+        accuracy: 0,
+        smileScore: 0,
+        startedAt: DateTime.utc(2026),
+        endedAt: DateTime.utc(2026),
+        state: GameSessionState.results,
+        isNewBest: false,
+      );
+      await expectLater(
+        repo.saveSession(unowned),
+        throwsA(isA<GameRepositoryException>()),
+      );
+      expect(await repo.getAllSessions(), isEmpty);
+    });
+
     test('invalid writes are rejected without leaking record values', () async {
-      final bad = GameSessionRecord.create().complete(
+      final bad = createTestSession().complete(
         finalScore: -500,
         finalLivesLost: 0,
         timePlayed: 30,
@@ -48,7 +72,7 @@ void main() {
     });
 
     test('corrupt stored rows fail safely in reads and streams', () async {
-      final record = GameSessionRecord.create().complete(
+      final record = createTestSession().complete(
         finalScore: 100,
         finalLivesLost: 0,
         timePlayed: 30,
@@ -87,6 +111,9 @@ void main() {
       expect(initialSessions, isEmpty);
 
       final record = GameSessionRecord(
+        playerId: createTestPlayer().id,
+        playerName: createTestPlayer().displayName,
+        playerAvatar: createTestPlayer().avatar,
         id: 0,
         score: 1250,
         livesLost: 1,
@@ -96,6 +123,9 @@ void main() {
         catches: 15,
         accuracy: 0.88,
         smileScore: 90,
+        usedSmileMode: true,
+        usedTouchMode: true,
+        completionTimezoneOffsetMinutes: 300,
         startedAt: DateTime.now().subtract(const Duration(minutes: 2)),
         endedAt: DateTime.now(),
         state: GameSessionState.results,
@@ -113,12 +143,15 @@ void main() {
       expect(saved.accuracy, closeTo(0.88, 0.001));
       expect(saved.state, GameSessionState.results);
       expect(saved.isNewBest, isTrue);
+      expect(saved.usedSmileMode, isTrue);
+      expect(saved.usedTouchMode, isTrue);
+      expect(saved.completionTimezoneOffsetMinutes, 300);
     });
 
     test(
       'actual completed round is visible and repeated save is idempotent',
       () async {
-        final record = GameSessionRecord.create().complete(
+        final record = createTestSession().complete(
           finalScore: 600,
           finalLivesLost: 1,
           timePlayed: 30,
@@ -137,6 +170,9 @@ void main() {
 
     test('getBestSession returns the session with highest score', () async {
       final record1 = GameSessionRecord(
+        playerId: createTestPlayer().id,
+        playerName: createTestPlayer().displayName,
+        playerAvatar: createTestPlayer().avatar,
         id: 0,
         score: 500,
         livesLost: 2,
@@ -151,6 +187,9 @@ void main() {
         isNewBest: false,
       );
       final record2 = GameSessionRecord(
+        playerId: createTestPlayer().id,
+        playerName: createTestPlayer().displayName,
+        playerAvatar: createTestPlayer().avatar,
         id: 0,
         score: 2200,
         livesLost: 0,
@@ -176,6 +215,9 @@ void main() {
 
     test('clearAllSessions wipes all records', () async {
       final record = GameSessionRecord(
+        playerId: createTestPlayer().id,
+        playerName: createTestPlayer().displayName,
+        playerAvatar: createTestPlayer().avatar,
         id: 0,
         score: 300,
         livesLost: 3,

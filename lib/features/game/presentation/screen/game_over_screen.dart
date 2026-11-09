@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:muskaan_minigame/features/profile/presentation/widgets/player_identity.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:muskaan_minigame/core/domain/game_session.dart';
@@ -117,6 +118,7 @@ class _GameOverScreenState extends State<GameOverScreen>
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    PlayerIdentity(record: widget.gameRecord),
                     const Opacity(
                       opacity: 0.80,
                       child: Text(

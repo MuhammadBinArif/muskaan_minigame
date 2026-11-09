@@ -1,5 +1,12 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'dart:async';
+import '../../../profile/presentation/widgets/player_identity.dart';
+import '../../../profile/data/player_profile_repository.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../tracking/domain/mouth_tracking_provider.dart';
+import '../../domain/smile_measurement.dart';
+import '../providers/smile_analytics_provider.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../shared/widgets/app_bottom_nav.dart';
@@ -89,29 +96,29 @@ class AppTypography {
 // ==========================================
 // SMILE SPOTLIGHT SCREEN
 // ==========================================
-class SmileSpotlightScreen extends StatefulWidget {
-  /// Final energy score, 0–100.
-  final int score;
-
-  /// Vibe breakdown values (each 0–100).
-  final int smileWidth;
-  final int eyeSparkle;
-  final int warmth;
-
-  const SmileSpotlightScreen({
-    super.key,
-    this.score = 92,
-    this.smileWidth = 88,
-    this.eyeSparkle = 95,
-    this.warmth = 92,
-  });
-
+class SmileSpotlightScreen extends ConsumerStatefulWidget {
+  const SmileSpotlightScreen({super.key});
   @override
-  State<SmileSpotlightScreen> createState() => _SmileSpotlightScreenState();
+  ConsumerState<SmileSpotlightScreen> createState() =>
+      _SmileSpotlightScreenState();
 }
 
-class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
+class _SmileSpotlightScreenState extends ConsumerState<SmileSpotlightScreen>
     with TickerProviderStateMixin {
+  bool _started = false;
+  MouthTrackingController? _controller;
+  ProviderSubscription<MouthTrackingState>? _measurementSubscription;
+  SmileRoundStatisticsCollector? _collector;
+  late final AppLifecycleListener _lifecycle;
+  int? get _intensity =>
+      _started
+          ? ref
+              .read(mouthTrackingProvider)
+              .smile
+              ?.smoothedCalibratedIntensity
+              ?.round()
+          : null;
+
   /// One-shot: drives ring sweep + score count-up + bars fill.
   late final AnimationController _scoreAnim;
   late final Animation<double> _scoreCurve;
@@ -127,6 +134,20 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(
+      onInactive: () {
+        unawaited(_controller?.stopTracking());
+      },
+      onPause: () {
+        unawaited(_controller?.stopTracking());
+      },
+      onHide: () {
+        unawaited(_controller?.stopTracking());
+      },
+      onResume: () {
+        if (_started) unawaited(_controller?.startTracking());
+      },
+    );
 
     _scoreAnim = AnimationController(
       vsync: this,
@@ -146,6 +167,9 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
 
   @override
   void dispose() {
+    _lifecycle.dispose();
+    _measurementSubscription?.close();
+    unawaited(_controller?.stopTracking());
     _scoreAnim.dispose();
     _glow.dispose();
     super.dispose();
@@ -153,6 +177,7 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_started) ref.watch(mouthTrackingProvider);
     return Scaffold(
       backgroundColor: AppColors.backgroundBottom,
       body: DecoratedBox(
@@ -176,6 +201,8 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
                 const SizedBox(height: 20),
                 _buildVibeBreakdown(),
                 const SizedBox(height: 14),
+                _buildHistoricalProgress(),
+                const SizedBox(height: 14),
                 _buildDisclaimer(),
               ],
             ),
@@ -184,6 +211,19 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 3),
     );
+  }
+
+  String _status() {
+    final tracking = ref.read(mouthTrackingProvider);
+    if (tracking.hasCameraError || tracking.error != null)
+      return 'Camera unavailable';
+    if (!tracking.isStreaming) return 'Measurement unavailable';
+    if (!tracking.isFaceDetected) return 'Face not detected';
+    return tracking.smile == null
+        ? 'Measurement unavailable'
+        : tracking.smile!.smoothedCalibratedIntensity == null
+        ? 'Smile calibration unavailable'
+        : 'Live calibrated on-device intensity';
   }
 
   // ---------------------------------------------------------------------------
@@ -241,6 +281,7 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
   Widget _buildHero(BuildContext context) {
     return Column(
       children: [
+        const PlayerIdentity(),
         // Ring + avatar
         RepaintBoundary(child: _buildProgressRing()),
         const SizedBox(height: 12),
@@ -249,10 +290,10 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
         AnimatedBuilder(
           animation: Listenable.merge([_scoreCurve, _glow]),
           builder: (context, _) {
-            final value = (_scoreCurve.value * widget.score).round();
+            final value = _intensity;
             final p = _glow.value;
             return Text(
-              '$value%',
+              value == null ? '—' : '$value%',
               style: AppTypography.score.copyWith(
                 shadows: [
                   Shadow(
@@ -271,11 +312,19 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
           },
         ),
         const SizedBox(height: 4),
-        const Text('SPOTLIGHT ENERGY', style: AppTypography.scoreLabel),
+        const Text('SMILE INTENSITY', style: AppTypography.scoreLabel),
         const SizedBox(height: 12),
 
         // RADIANT badge
-        _buildBadge(),
+        Text(_started ? _status() : 'Start the camera to measure a smile.'),
+        TextButton(
+          onPressed: _startMeasurement,
+          child: const Text('Start measurement'),
+        ),
+        TextButton(
+          onPressed: _stopMeasurement,
+          child: const Text('Stop measurement'),
+        ),
       ],
     );
   }
@@ -291,7 +340,7 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
           AnimatedBuilder(
             animation: Listenable.merge([_scoreCurve, _glow]),
             builder: (context, _) {
-              final progress = _scoreCurve.value * (widget.score / 100);
+              final progress = ((_intensity ?? 0) / 100);
               final p = _glow.value;
               return CustomPaint(
                 size: const Size(_ringSize, _ringSize),
@@ -322,9 +371,9 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
               ),
               border: Border.all(color: AppColors.ringBorder, width: 2),
             ),
-            child: const Text(
-              '😊',
-              style: TextStyle(fontSize: 34, height: 1.0),
+            child: Text(
+              ref.watch(playerProfileProvider).asData?.value.avatar ?? '🥷',
+              style: const TextStyle(fontSize: 34, height: 1.0),
             ),
           ),
         ],
@@ -332,36 +381,6 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
     );
   }
 
-  Widget _buildBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        gradient: const LinearGradient(
-          colors: [AppColors.accentOrange, AppColors.accentGold],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.accentOrange.withValues(alpha: 0.50),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('✨', style: TextStyle(fontSize: 13, height: 1.0)),
-          SizedBox(width: 6),
-          Text('RADIANT', style: AppTypography.badge),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // VIBE BREAKDOWN CARD
-  // ---------------------------------------------------------------------------
   Widget _buildVibeBreakdown() {
     return AnimatedBuilder(
       animation: _glow,
@@ -388,71 +407,113 @@ class _SmileSpotlightScreenState extends State<SmileSpotlightScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Vibe Breakdown', style: AppTypography.sectionTitle),
+          const Text('Measurement details', style: AppTypography.sectionTitle),
           const SizedBox(height: 14),
-          _buildBar('Smile Width', widget.smileWidth, AppColors.accentOrange),
+          const Text(
+            'Calibrated on-device smile intensity; not an emotion measurement.',
+          ),
           const SizedBox(height: 10),
-          _buildBar('Eye Sparkle', widget.eyeSparkle, AppColors.accentGold),
+          Text(
+            _collector?.statistics.averageCalibratedIntensity == null
+                ? 'Average Smile Intensity: unavailable'
+                : 'Average Smile Intensity: ${_collector!.statistics.averageCalibratedIntensity!.round()}%',
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _collector?.statistics.peakCalibratedIntensity == null
+                ? 'Peak Smile Intensity: unavailable'
+                : 'Peak Smile Intensity: ${_collector!.statistics.peakCalibratedIntensity!.round()}%',
+          ),
           const SizedBox(height: 10),
-          _buildBar('Warmth', widget.warmth, AppColors.accentGreen),
+          const Text('Processed on this device. No face images are saved.'),
         ],
       ),
     );
   }
 
-  Widget _buildBar(String label, int target, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(child: Text(label, style: AppTypography.barLabel)),
-            AnimatedBuilder(
-              animation: _scoreCurve,
-              builder: (context, _) {
-                final value = (_scoreCurve.value * target).round();
-                return Text(
-                  '$value%',
-                  style: AppTypography.barValue.copyWith(color: color),
-                );
-              },
+  Widget _buildHistoricalProgress() {
+    final player = ref.watch(playerProfileProvider).asData?.value;
+    if (player == null) return const SizedBox.shrink();
+    final history = ref.watch(
+      playerSmileHistoryProvider(
+        SmileHistoryQuery(player.id, SmileAnalyticsRange.thirtyDays),
+      ),
+    );
+    return Container(
+      key: const Key('spotlight-historical-progress'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: history.when(
+        loading: () => const Text('Loading historical progress…'),
+        error:
+            (_, _) => const Text(
+              'Historical progress is unavailable. Saved results were preserved.',
             ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        // Progress bar
-        Container(
-          height: 6,
-          decoration: BoxDecoration(
-            color: AppColors.barTrack,
-            borderRadius: BorderRadius.circular(3),
-          ),
-          child: AnimatedBuilder(
-            animation: _scoreCurve,
-            builder: (context, _) {
-              final widthFactor = _scoreCurve.value * (target / 100);
-              return FractionallySizedBox(
-                alignment: Alignment.centerLeft,
-                widthFactor: widthFactor,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(3),
-                    gradient: LinearGradient(
-                      colors: [color.withValues(alpha: 0.60), color],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+        data: (rounds) {
+          final summary = playerSmileAnalytics.progress(rounds);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Historical progress · last 30 days',
+                style: AppTypography.sectionTitle,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                summary == null
+                    ? 'No calibrated measured rounds are available.'
+                    : '${summary.eligibleRoundCount} measured rounds · '
+                        '${summary.averageOfRoundAverages.toStringAsFixed(1)}% average of round averages · '
+                        '${summary.highestPeakIntensity.toStringAsFixed(1)}% highest peak',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Historical values come from completed rounds. Live measurement above belongs only to this session.',
+                style: AppTypography.disclaimer,
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // DISCLAIMER
-  // ---------------------------------------------------------------------------
+  Future<void> _startMeasurement() async {
+    _controller = ref.read(mouthTrackingProvider.notifier);
+    final player = ref.read(playerProfileProvider).asData?.value;
+    if (player == null) return;
+    _collector = SmileRoundStatisticsCollector(
+      playerId: player.id,
+      roundId: DateTime.now().microsecondsSinceEpoch,
+    );
+    _measurementSubscription?.close();
+    _measurementSubscription = ref.listenManual<MouthTrackingState>(
+      mouthTrackingProvider,
+      (_, next) {
+        final measurement = next.smile;
+        if (measurement != null &&
+            _collector!.add(measurement, now: DateTime.now()) &&
+            mounted) {
+          setState(() {});
+        }
+      },
+      fireImmediately: true,
+    );
+    if (mounted) setState(() => _started = true);
+    await _controller!.startTracking();
+  }
+
+  void _stopMeasurement() {
+    _measurementSubscription?.close();
+    _measurementSubscription = null;
+    unawaited(_controller?.stopTracking());
+    if (mounted) setState(() => _started = false);
+  }
+
   Widget _buildDisclaimer() {
     return Container(
       padding: const EdgeInsets.all(12),

@@ -15,6 +15,7 @@ class VisionServiceImpl implements VisionService {
     : _detector = FaceDetector(
         options: FaceDetectorOptions(
           enableLandmarks: false,
+          enableClassification: true,
           enableContours: true,
           enableTracking: true,
           performanceMode: FaceDetectorMode.fast,
@@ -99,6 +100,7 @@ class VisionServiceImpl implements VisionService {
 
     return VisionFrame(
       observation: FaceTrackingObservation(
+        smileProbability: face.smilingProbability,
         faceDetected: true,
         faceCount: 1,
         facePosition: Offset(faceCenter.x, faceCenter.y),

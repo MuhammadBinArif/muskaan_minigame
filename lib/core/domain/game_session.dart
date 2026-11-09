@@ -13,6 +13,20 @@ enum FoodItemType { gold, tea, teal }
 
 /// Game session record for persistence.
 class GameSessionRecord {
+  final String? playerId;
+  final String? playerName;
+  final String? playerAvatar;
+  final int smileSampleCount;
+  final double? averageSmileProbability;
+  final double? peakSmileProbability;
+  final bool? calibratedSmileAttempted;
+  final int? calibratedSmileSampleCount;
+  final double? averageCalibratedSmileIntensity;
+  final double? peakCalibratedSmileIntensity;
+  final int? calibratedSmileObservationSpanMs;
+  final bool? usedSmileMode;
+  final bool? usedTouchMode;
+  final int? completionTimezoneOffsetMinutes;
   final int id;
   static int _lastSessionId = 0;
   final int score;
@@ -22,13 +36,28 @@ class GameSessionRecord {
   final int bestCombo;
   final int catches;
   final double accuracy; // 0.0 – 1.0
-  final int smileScore; // 0 – 100
+  /// Legacy derived value retained only for history compatibility.
+  final int smileScore;
   final DateTime startedAt;
   final DateTime? endedAt;
   final GameSessionState state;
   final bool isNewBest;
 
   const GameSessionRecord({
+    this.playerId,
+    this.playerName,
+    this.playerAvatar,
+    this.smileSampleCount = 0,
+    this.averageSmileProbability,
+    this.peakSmileProbability,
+    this.calibratedSmileAttempted,
+    this.calibratedSmileSampleCount,
+    this.averageCalibratedSmileIntensity,
+    this.peakCalibratedSmileIntensity,
+    this.calibratedSmileObservationSpanMs,
+    this.usedSmileMode,
+    this.usedTouchMode,
+    this.completionTimezoneOffsetMinutes,
     required this.id,
     required this.score,
     required this.livesLost,
@@ -47,7 +76,45 @@ class GameSessionRecord {
   /// Check persisted values without treating local scores as authoritative.
   /// Reject corruption rather than silently converting it to valid game data.
   void validate() {
-    if (id < 0 ||
+    if ((playerId != null &&
+            (!RegExp(r'^[a-f0-9]{32}$').hasMatch(playerId!) ||
+                playerName == null ||
+                playerAvatar == null)) ||
+        (averageSmileProbability != null &&
+            peakSmileProbability != null &&
+            averageSmileProbability! > peakSmileProbability!) ||
+        smileSampleCount < 0 ||
+        (smileSampleCount == 0 &&
+            (averageSmileProbability != null ||
+                peakSmileProbability != null)) ||
+        (smileSampleCount > 0 &&
+            (averageSmileProbability == null ||
+                peakSmileProbability == null)) ||
+        [
+          averageSmileProbability,
+          peakSmileProbability,
+        ].whereType<double>().any((v) => !v.isFinite || v < 0 || v > 1) ||
+        (calibratedSmileSampleCount != null &&
+            calibratedSmileSampleCount! < 0) ||
+        (calibratedSmileSampleCount == 0 &&
+            (averageCalibratedSmileIntensity != null ||
+                peakCalibratedSmileIntensity != null)) ||
+        ((calibratedSmileSampleCount ?? 0) > 0 &&
+            (averageCalibratedSmileIntensity == null ||
+                peakCalibratedSmileIntensity == null)) ||
+        (averageCalibratedSmileIntensity != null &&
+            peakCalibratedSmileIntensity != null &&
+            averageCalibratedSmileIntensity! > peakCalibratedSmileIntensity!) ||
+        [
+          averageCalibratedSmileIntensity,
+          peakCalibratedSmileIntensity,
+        ].whereType<double>().any((v) => !v.isFinite || v < 0 || v > 100) ||
+        (calibratedSmileObservationSpanMs != null &&
+            calibratedSmileObservationSpanMs! < 0) ||
+        (completionTimezoneOffsetMinutes != null &&
+            (completionTimezoneOffsetMinutes! < -840 ||
+                completionTimezoneOffsetMinutes! > 840)) ||
+        id < 0 ||
         score < 0 ||
         maxLives <= 0 ||
         livesLost < 0 ||
@@ -69,12 +136,21 @@ class GameSessionRecord {
   /// Create a brand-new, unpersisted session record.
   ///
   /// Allocate a stable SQLite-safe key once, before gameplay begins.
-  factory GameSessionRecord.create() {
+  factory GameSessionRecord.create({
+    required String playerId,
+    required String playerName,
+    required String playerAvatar,
+  }) {
     final now = DateTime.now();
     final candidate = now.microsecondsSinceEpoch;
     _lastSessionId =
         candidate > _lastSessionId ? candidate : _lastSessionId + 1;
-    return GameSessionRecord(
+    final record = GameSessionRecord(
+      playerId: playerId,
+      playerName: playerName,
+      playerAvatar: playerAvatar,
+      calibratedSmileAttempted: false,
+      calibratedSmileSampleCount: 0,
       id: _lastSessionId,
       score: 0,
       livesLost: 0,
@@ -89,6 +165,8 @@ class GameSessionRecord {
       state: GameSessionState.ready,
       isNewBest: false,
     );
+    record.validate();
+    return record;
   }
 
   /// Create a completed copy of this session.
@@ -100,8 +178,44 @@ class GameSessionRecord {
     required int finalCatches,
     required double finalAccuracy,
     required int finalSmileScore,
+    String? currentPlayerName,
+    String? currentPlayerAvatar,
+    int smileSampleCount = 0,
+    double? averageSmileProbability,
+    double? peakSmileProbability,
+    bool? calibratedSmileAttempted,
+    int? calibratedSmileSampleCount,
+    double? averageCalibratedSmileIntensity,
+    double? peakCalibratedSmileIntensity,
+    int? calibratedSmileObservationSpanMs,
+    bool? usedSmileMode,
+    bool? usedTouchMode,
+    int? completionTimezoneOffsetMinutes,
   }) {
     return GameSessionRecord(
+      playerId: playerId,
+      playerName: currentPlayerName ?? playerName,
+      playerAvatar: currentPlayerAvatar ?? playerAvatar,
+      smileSampleCount: smileSampleCount,
+      averageSmileProbability: averageSmileProbability,
+      peakSmileProbability: peakSmileProbability,
+      calibratedSmileAttempted:
+          calibratedSmileAttempted ?? this.calibratedSmileAttempted,
+      calibratedSmileSampleCount:
+          calibratedSmileSampleCount ?? this.calibratedSmileSampleCount,
+      averageCalibratedSmileIntensity:
+          averageCalibratedSmileIntensity ??
+          this.averageCalibratedSmileIntensity,
+      peakCalibratedSmileIntensity:
+          peakCalibratedSmileIntensity ?? this.peakCalibratedSmileIntensity,
+      calibratedSmileObservationSpanMs:
+          calibratedSmileObservationSpanMs ??
+          this.calibratedSmileObservationSpanMs,
+      usedSmileMode: usedSmileMode ?? this.usedSmileMode,
+      usedTouchMode: usedTouchMode ?? this.usedTouchMode,
+      completionTimezoneOffsetMinutes:
+          completionTimezoneOffsetMinutes ??
+          this.completionTimezoneOffsetMinutes,
       id: id,
       score: finalScore,
       livesLost: finalLivesLost,
@@ -240,7 +354,7 @@ class GameStats {
       hazardsHit: newHazards,
       totalFoodsSpawned: totalFoodsSpawned,
       accuracy: newAccuracy,
-      smileScore: _smileScore(newScore, newCombo, newAccuracy),
+      smileScore: smileScore,
     );
   }
 
@@ -255,7 +369,7 @@ class GameStats {
       hazardsHit: hazardsHit,
       totalFoodsSpawned: totalFoodsSpawned,
       accuracy: accuracy,
-      smileScore: _smileScore(score, 0, accuracy),
+      smileScore: smileScore,
     );
   }
 
@@ -278,11 +392,6 @@ class GameStats {
     if (isGameOver) return 'no_lives';
     if (isTimeOut) return 'time_up';
     return null;
-  }
-
-  static int _smileScore(int score, int combo, double accuracy) {
-    final raw = score + (combo * 100) + (accuracy * 100).toInt();
-    return raw.clamp(0, 100);
   }
 
   static int _pointsFor(FoodItemType type) {

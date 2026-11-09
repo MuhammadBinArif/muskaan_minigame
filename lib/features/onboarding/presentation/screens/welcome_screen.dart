@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui' show PathMetric;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muskaan_minigame/features/profile/data/player_profile_repository.dart';
 import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
 
 // ==========================================
@@ -65,15 +67,16 @@ class AppTypography {
 // ==========================================
 // WELCOME SCREEN
 // ==========================================
-class WelcomeScreen extends StatefulWidget {
+class WelcomeScreen extends ConsumerStatefulWidget {
   const WelcomeScreen({super.key});
 
   @override
-  State<WelcomeScreen> createState() => _WelcomeScreenState();
+  ConsumerState<WelcomeScreen> createState() => _WelcomeScreenState();
 }
 
-class _WelcomeScreenState extends State<WelcomeScreen>
+class _WelcomeScreenState extends ConsumerState<WelcomeScreen>
     with TickerProviderStateMixin {
+  late final Future<void> _profileReady;
   // Falls (sawtooth loop) — drives falling emojis + score pop
   late AnimationController _fallController;
   // Pulse (ping-pong loop) — drives card glow, dashed oval, mouth ring
@@ -82,6 +85,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   @override
   void initState() {
     super.initState();
+    _profileReady = ref.read(playerProfileProvider.notifier).ready;
 
     // 3s loop: one complete fall cycle
     _fallController = AnimationController(
@@ -459,7 +463,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(27),
-          onTap: () => context.push('/how-to-play/step1'),
+          onTap: _showHowItWorks,
           child: const Center(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -477,9 +481,42 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
   Widget _buildSkipButton(BuildContext context) {
     return TextButton(
-      onPressed: () => context.go('/home'),
+      onPressed: _skipIntro,
       child: const Text('Skip intro', style: AppTypography.skip),
     );
+  }
+
+  Future<void> _skipIntro() async {
+    final controller = ref.read(playerProfileProvider.notifier);
+    await _profileReady;
+    if (!mounted) return;
+    final profile = ref.read(playerProfileProvider).asData?.value;
+    if (profile == null) {
+      context.go('/player-setup');
+      return;
+    }
+    try {
+      if (!profile.onboarded) await controller.update(onboarded: true);
+      if (mounted) context.go('/home');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to finish setup. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showHowItWorks() async {
+    await _profileReady;
+    if (!mounted) return;
+    if (!ref.read(playerProfileProvider).hasValue) {
+      context.go('/player-setup');
+      return;
+    }
+    context.push('/how-to-play/step1');
   }
 }
 

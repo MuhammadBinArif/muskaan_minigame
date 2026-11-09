@@ -1,9 +1,18 @@
+import '../../features/audio/audio_service.dart';
 // Provider for the current game session state.
 //
 // Exposes [gameSessionProvider] which holds the live [GameSessionStateData]
 // and the [GameSessionNotifier] that mutates it.
 
 import 'dart:async';
+import '../../features/profile/data/player_profile_repository.dart';
+import '../../features/profile/domain/player_profile.dart';
+import '../../features/smile/domain/smile_measurement.dart';
+import '../../features/achievements/application/achievement_service.dart';
+import '../../features/challenges/application/daily_challenge_service.dart';
+import '../../features/progression/application/progression_service.dart';
+import '../../features/progression/data/progression_repository.dart';
+import '../../features/progression/domain/player_progression.dart';
 import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,7 +24,78 @@ import 'package:muskaan_minigame/features/game/data/records_repository.dart';
 final gameSessionProvider =
     StateNotifierProvider<GameSessionNotifier, GameSessionStateData>((ref) {
       final repository = ref.watch(gameRecordsRepositoryProvider);
-      return GameSessionNotifier(repository: repository);
+      return GameSessionNotifier(
+        repository: repository,
+        sound: (event) => ref.read(audioServiceProvider).play(event),
+        music: (track) => ref.read(audioServiceProvider).selectMusic(track),
+        profile: () => ref.read(playerProfileProvider).requireValue,
+        onResultPersisted: (record) async {
+          final playerId = record.playerId!;
+          final audio = ref.read(audioServiceProvider);
+          final progressionRepository = ref.read(progressionRepositoryProvider);
+          var awardsBefore = <ProgressionAward>[];
+          var unlocksBefore = <CosmeticUnlock>[];
+          try {
+            awardsBefore = await progressionRepository.getAwards(playerId);
+            unlocksBefore = await progressionRepository.getUnlocks(playerId);
+          } catch (_) {
+            // Optional sound comparisons must not block persisted rewards.
+          }
+          final xpBefore = awardsBefore.fold<int>(
+            0,
+            (total, award) => total + award.xp,
+          );
+          final unlocks = await ref
+              .read(achievementServiceProvider)
+              .evaluatePersistedResult(
+                playerId: playerId,
+                sourceResultId: record.id,
+                completedAt: record.endedAt!,
+              );
+          ref.invalidate(playerAchievementProgressProvider(playerId));
+          ref.invalidate(dailyEngagementProvider(playerId));
+          final progression = await ref
+              .read(progressionServiceProvider)
+              .synchronize(playerId);
+          ref.invalidate(playerProgressionProvider(playerId));
+          if (unlocks.isNotEmpty) {
+            ref.read(latestAchievementUnlocksProvider.notifier).state = unlocks;
+          }
+          var personalBest = false;
+          var challengeEarned = false;
+          try {
+            final history = await repository.getAllSessions();
+            final previous = history.where(
+              (item) => item.playerId == playerId && item.id != record.id,
+            );
+            final previousBest = previous.fold<int>(
+              0,
+              (best, item) => item.score > best ? item.score : best,
+            );
+            personalBest = record.score > previousBest;
+            challengeEarned = await ref
+                .read(dailyChallengeServiceProvider)
+                .newlyCompletedByResult(playerId: playerId, result: record);
+          } catch (_) {
+            // Audio detection is nonblocking and can recover on later screens.
+          }
+          final priorCosmetics =
+              unlocksBefore.map((unlock) => unlock.cosmeticId).toSet();
+          final cosmeticEarned = progression.recentUnlocks.any(
+            (unlock) => !priorCosmetics.contains(unlock.cosmeticId),
+          );
+          for (final reward in persistedRewardSounds(
+            personalBest: personalBest,
+            achievementUnlocked: unlocks.isNotEmpty,
+            challengeCompleted: challengeEarned,
+            levelIncreased:
+                progression.level > ProgressionService.rules.levelFor(xpBefore),
+            cosmeticUnlocked: cosmeticEarned,
+          )) {
+            audio.play(reward);
+          }
+        },
+      );
     });
 
 /// Data class that contains all the information needed by the UI
@@ -94,9 +174,54 @@ class GameSessionStateData {
 /// Notifier that manages the game session state and applies game logic
 class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   final GameRecordsRepository? repository;
+  final void Function(Sound)? sound;
+  final void Function(String?)? music;
+  final PlayerProfile Function() profile;
+  final Future<void> Function(GameSessionRecord)? onResultPersisted;
+
+  PlayerProfile? _currentPlayer() {
+    try {
+      return profile();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int _smileCount = 0;
+  double _smileSum = 0, _smilePeak = 0;
+  DateTime? _lastSmileAt;
+  SmileRoundStatisticsCollector? _calibratedSmileCollector;
+  bool _calibratedSmileAttempted = false;
+  bool _usedSmileMode = false;
+  bool _usedTouchMode = false;
+  void observeSmile(SmileMeasurement? measurement) {
+    if (!state.isPlaying ||
+        measurement == null ||
+        (_lastSmileAt != null &&
+            !measurement.capturedAt.isAfter(_lastSmileAt!)))
+      return;
+    _calibratedSmileAttempted = true;
+    _calibratedSmileCollector?.add(measurement, now: DateTime.now());
+    final p = measurement.rawProbability;
+    final age = DateTime.now().difference(measurement.capturedAt);
+    if (!p.isFinite ||
+        p < 0 ||
+        p > 1 ||
+        age.isNegative ||
+        age > const Duration(milliseconds: 500))
+      return;
+    _lastSmileAt = measurement.capturedAt;
+    _smileCount++;
+    _smileSum += p;
+    _smilePeak = math.max(_smilePeak, p);
+  }
 
   GameSessionNotifier({
     this.repository,
+    this.sound,
+    this.music,
+    required this.profile,
+    this.onResultPersisted,
     this.sessionDuration = const Duration(seconds: 45),
     Stopwatch? clock,
   }) : _clock = clock ?? Stopwatch(),
@@ -111,6 +236,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   GameSessionRecord? _session;
   int _lastTickMs = 0;
   bool _biteConsumed = false;
+  String? get activePlayerId => _session?.playerId;
   final Duration sessionDuration;
   final Stopwatch _clock;
   final math.Random _random = math.Random();
@@ -217,6 +343,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
           if (updatedFood.type != FoodItemType.tea) {
             stats = stats.applyMiss();
             misses++;
+            sound?.call(Sound.miss);
           }
         }
 
@@ -241,6 +368,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   void _endGame() {
     if (state.state == GameSessionState.gameOver) return;
 
+    sound?.call(Sound.gameOver);
+    music?.call('results');
     _gameStopwatch.stop();
     final record = getGameResults();
     state = state.copyWith(
@@ -264,6 +393,15 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     if (_hasPersisted || repository == null || record == null) {
       return Future<void>.value();
     }
+    if (record.playerId == null ||
+        record.playerName == null ||
+        record.playerAvatar == null) {
+      state = state.copyWith(
+        isSaving: false,
+        saveError: 'Player profile unavailable. This round was not saved.',
+      );
+      return Future<void>.value();
+    }
     state = state.copyWith(isSaving: true, clearSaveError: true);
     final operation = _saveRecord(record);
     _saveInFlight = operation;
@@ -277,6 +415,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
         _hasPersisted = true;
         state = state.copyWith(isSaving: false, clearSaveError: true);
       }
+      final callback = onResultPersisted;
+      if (callback != null) unawaited(_notifyPersisted(callback, record));
     } catch (error) {
       if (mounted && state.completedRecord?.id == record.id) {
         state = state.copyWith(
@@ -289,16 +429,49 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     }
   }
 
+  Future<void> _notifyPersisted(
+    Future<void> Function(GameSessionRecord) callback,
+    GameSessionRecord record,
+  ) async {
+    try {
+      await callback(record);
+    } catch (_) {
+      // Achievement notification/evaluation cannot affect persisted results.
+    }
+  }
+
   /// Start a new game session
-  void startGame() {
+  void startGame({bool touchOnly = false}) {
     if (!state.canStartGame || state.isSaving || state.saveError != null) {
       return;
     }
 
+    final player = _currentPlayer();
+    if (player == null) {
+      throw StateError('A valid player profile is required to start a round.');
+    }
+    sound?.call(Sound.start);
+    music?.call('gameplay');
+    final ownedSession = GameSessionRecord.create(
+      playerId: player.id,
+      playerName: player.displayName,
+      playerAvatar: player.avatar,
+    );
+    _smileCount = 0;
+    _smileSum = 0;
+    _smilePeak = 0;
+    _lastSmileAt = null;
+    _calibratedSmileAttempted = false;
+    _usedSmileMode = !touchOnly;
+    _usedTouchMode = touchOnly;
+    _calibratedSmileCollector = SmileRoundStatisticsCollector(
+      playerId: player.id,
+      roundId: ownedSession.id,
+    );
     // Reset game
     _resetGame();
     _hasPersisted = false;
-    _session = GameSessionRecord.create();
+    _session = ownedSession;
     _lastTickMs = 0;
     _biteConsumed = false;
     state = GameSessionStateData.initial();
@@ -314,6 +487,14 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
       isReady: false,
       stats: GameStats.initial().updateTimeRemaining(_gameDurationSeconds),
     );
+  }
+
+  void recordInputMode({required bool touchOnly}) {
+    if (touchOnly) {
+      _usedTouchMode = true;
+    } else {
+      _usedSmileMode = true;
+    }
   }
 
   void _resetGame() {
@@ -332,6 +513,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   /// Pause the game
   void pauseGame() {
     if (!state.canPause) return;
+    sound?.call(Sound.pause);
+    music?.call(null);
 
     _gameStopwatch.stop();
     state = state.copyWith(
@@ -344,6 +527,8 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   /// Resume the game
   void resumeGame() {
     if (!state.canResume) return;
+    sound?.call(Sound.resume);
+    music?.call('gameplay');
 
     _gameStopwatch.start();
     state = state.copyWith(
@@ -438,6 +623,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
           isCatch: isEdible,
         );
         stats = stats.applyCollision(collision);
+        _playCollisionSounds(collision, stats.combo);
         recentCollisions.insert(0, collision);
       } else {
         remainingFoods.add(food);
@@ -482,8 +668,10 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
       isCatch: isEdible,
     );
 
+    final updatedStats = state.stats.applyCollision(collision);
+    _playCollisionSounds(collision, updatedStats.combo);
     state = state.copyWith(
-      stats: state.stats.applyCollision(collision),
+      stats: updatedStats,
       activeFoods: remainingFoods,
       recentCollisions: [collision, ...state.recentCollisions.take(4)],
     );
@@ -493,10 +681,46 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     }
   }
 
+  void _playCollisionSounds(CollisionEvent collision, int combo) {
+    if (!collision.isCatch) {
+      sound?.call(Sound.hazard);
+      return;
+    }
+    sound?.call(Sound.catchFood);
+    if (collision.foodType == FoodItemType.gold) sound?.call(Sound.bonus);
+    if (combo >= 3 && combo % 3 == 0) sound?.call(Sound.combo);
+  }
+
   /// Get final game results for persistence
   GameSessionRecord getGameResults() {
     if (state.completedRecord != null) return state.completedRecord!;
-    return (_session ??= GameSessionRecord.create()).complete(
+    if (_session == null) {
+      throw StateError('No owned round has been started.');
+    }
+    final currentPlayer = _currentPlayer();
+    final calibrated = _calibratedSmileCollector?.statistics;
+    return _session!.complete(
+      currentPlayerName:
+          currentPlayer?.id == _session?.playerId
+              ? currentPlayer?.displayName
+              : null,
+      currentPlayerAvatar:
+          currentPlayer?.id == _session?.playerId
+              ? currentPlayer?.avatar
+              : null,
+      smileSampleCount: _smileCount,
+      averageSmileProbability:
+          _smileCount == 0 ? null : _smileSum / _smileCount,
+      peakSmileProbability: _smileCount == 0 ? null : _smilePeak,
+      calibratedSmileAttempted: _calibratedSmileAttempted,
+      calibratedSmileSampleCount: calibrated?.validObservationCount ?? 0,
+      averageCalibratedSmileIntensity: calibrated?.averageCalibratedIntensity,
+      peakCalibratedSmileIntensity: calibrated?.peakCalibratedIntensity,
+      calibratedSmileObservationSpanMs:
+          calibrated?.observationSpan?.inMilliseconds,
+      usedSmileMode: _usedSmileMode,
+      usedTouchMode: _usedTouchMode,
+      completionTimezoneOffsetMinutes: DateTime.now().timeZoneOffset.inMinutes,
       finalScore: state.stats.score,
       finalLivesLost: _maxLives - state.stats.lives,
       timePlayed: _gameDurationSeconds - state.stats.timeRemaining,

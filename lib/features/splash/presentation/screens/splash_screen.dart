@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../profile/data/player_profile_repository.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -34,14 +36,14 @@ class AppTypography {
 // ==========================================
 // SPLASH SCREEN
 // ==========================================
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
   // ---- Entry animation (one-shot) ----
   late AnimationController _entryController;
@@ -95,7 +97,7 @@ class _SplashScreenState extends State<SplashScreen>
       // mutated mid-frame.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && context.mounted) {
-          context.go('/welcome');
+          unawaited(_openPlayer());
         }
       });
     });
@@ -120,6 +122,15 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Kick off entry
     _entryController.forward();
+  }
+
+  Future<void> _openPlayer() async {
+    await ref.read(playerProfileProvider.notifier).ready;
+    if (!mounted) return;
+    final profile = ref.read(playerProfileProvider).asData?.value;
+    context.go(
+      profile == null || !profile.onboarded ? '/player-setup' : '/home',
+    );
   }
 
   @override

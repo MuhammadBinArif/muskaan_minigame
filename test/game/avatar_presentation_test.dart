@@ -7,6 +7,7 @@ import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/game/presentation/flame/avatar_presentation.dart';
 import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
 import '../session_regression_test.dart' show TestClock;
+import '../support/player_fixture.dart';
 
 class AvatarRepository implements ProfileAvatarRepository {
   final changes = StreamController<ProfileAvatar?>();
@@ -164,7 +165,7 @@ void main() {
     'actual falling miss emits once without changing score or lives',
     (tester) async {
       final clock = TestClock();
-      final game = GameSessionNotifier(clock: clock);
+      final game = GameSessionNotifier(clock: clock, profile: createTestPlayer);
       game.startGame();
       game.state = game.state.copyWith(
         activeFoods: [

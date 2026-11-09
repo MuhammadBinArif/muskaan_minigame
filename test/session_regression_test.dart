@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
+import 'support/player_fixture.dart';
 
 class TestClock implements Stopwatch {
   int milliseconds = 0;
@@ -64,6 +65,37 @@ const food = FoodItem(
 );
 
 void main() {
+  test('new round construction rejects empty and null player IDs', () {
+    expect(
+      () => GameSessionRecord.create(
+        playerId: '',
+        playerName: 'Player',
+        playerAvatar: '🥷',
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => Function.apply(GameSessionRecord.create, const [], const {
+        #playerId: null,
+        #playerName: 'Player',
+        #playerAvatar: '🥷',
+      }),
+      throwsA(anything),
+    );
+  });
+
+  test('an unavailable application profile cannot start an unowned round', () {
+    final repository = RetryRepository()..fail = false;
+    final game = GameSessionNotifier(
+      repository: repository,
+      profile: () => throw StateError('profile unavailable'),
+    );
+    addTearDown(game.dispose);
+    expect(game.startGame, throwsStateError);
+    expect(game.state.state, GameSessionState.ready);
+    expect(repository.calls, 0);
+  });
+
   test('food enters from above and reaches the mouth before expiry', () {
     var falling = const FoodItem(
       type: FoodItemType.gold,
@@ -84,14 +116,18 @@ void main() {
 
   test('pause stops elapsed time and restart clears food and collisions', () {
     final clock = TestClock();
-    final game = GameSessionNotifier(clock: clock);
+    final game = GameSessionNotifier(clock: clock, profile: createTestPlayer);
     addTearDown(game.dispose);
     game.startGame();
+    final owner = game.activePlayerId;
+    expect(owner, createTestPlayer().id);
     clock.advance(2000);
     game.pauseGame();
+    expect(game.activePlayerId, owner);
     clock.advance(10000);
     expect(clock.elapsedMilliseconds, 2000);
     game.resumeGame();
+    expect(game.activePlayerId, owner);
     clock.advance(1000);
     expect(clock.elapsedMilliseconds, 3000);
     game.state = game.state.copyWith(activeFoods: [food]);
@@ -105,7 +141,7 @@ void main() {
   });
 
   test('one sustained opening consumes at most one food', () {
-    final game = GameSessionNotifier();
+    final game = GameSessionNotifier(profile: createTestPlayer);
     addTearDown(game.dispose);
     game.startGame();
     game.state = game.state.copyWith(activeFoods: [food, food]);
@@ -119,7 +155,7 @@ void main() {
   });
 
   test('collision follows supplied mouth coordinates', () {
-    final game = GameSessionNotifier();
+    final game = GameSessionNotifier(profile: createTestPlayer);
     addTearDown(game.dispose);
     game.startGame();
     game.state = game.state.copyWith(activeFoods: [food]);
@@ -143,7 +179,10 @@ void main() {
     'failed save retries the same immutable session and preserves results',
     () async {
       final repo = RetryRepository();
-      final game = GameSessionNotifier(repository: repo);
+      final game = GameSessionNotifier(
+        repository: repo,
+        profile: createTestPlayer,
+      );
       addTearDown(game.dispose);
       game.startGame();
       game.quitGame();
@@ -167,8 +206,8 @@ void main() {
   );
 
   test('session identifiers are unique and completion preserves identity', () {
-    final first = GameSessionRecord.create();
-    final next = GameSessionRecord.create();
+    final first = createTestSession();
+    final next = createTestSession();
     expect(next.id, greaterThan(first.id));
     final completed = first.complete(
       finalScore: 10,
