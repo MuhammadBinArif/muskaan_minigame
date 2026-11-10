@@ -29,7 +29,7 @@ class DailyChallengeService {
   }) async {
     final completedAt = result.endedAt;
     if (completedAt == null || result.playerId != playerId) return false;
-    final history = await records.getAllSessions();
+    final history = await records.getPlayerSessions(playerId);
     final owned = history.where((record) => record.playerId == playerId);
     final daily = await assignments.loadOrCreate(
       playerId: playerId,
@@ -59,7 +59,7 @@ class DailyChallengeService {
 
   Future<DailyEngagementState> load(String playerId, {DateTime? now}) async {
     final instant = now ?? DateTime.now();
-    final history = await records.getAllSessions();
+    final history = await records.getPlayerSessions(playerId);
     final owned =
         history.where((record) => record.playerId == playerId).toList();
     final daily = await assignments.loadOrCreate(

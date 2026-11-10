@@ -89,7 +89,7 @@ void main() {
               "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('daily_challenge_assignments', 'player_challenge_clock') ORDER BY name",
             )
             .get();
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
     expect(tables, hasLength(2));
     final integrity =
         await database.customSelect('PRAGMA integrity_check').getSingle();

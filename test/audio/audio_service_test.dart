@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:muskaan_minigame/features/audio/audio_service.dart';
@@ -36,8 +38,10 @@ class Backend implements AudioBackend {
 class Preferences implements AudioPreferences {
   Map<String, dynamic> data = {};
   bool fail = false;
+  int loads = 0;
   @override
   Future<Map<String, dynamic>> load() async {
+    loads++;
     if (fail) throw const FormatException('corrupt preferences');
     return data;
   }
@@ -45,6 +49,36 @@ class Preferences implements AudioPreferences {
   @override
   Future<void> save(Map<String, dynamic> value) async {
     data = value;
+  }
+}
+
+class EffectPlayer implements EffectPlayback {
+  final completedController = StreamController<void>.broadcast(sync: true);
+  int plays = 0;
+  int stops = 0;
+  int disposals = 0;
+  bool fail = false;
+
+  @override
+  Stream<void> get completed => completedController.stream;
+
+  @override
+  Future<void> play(String asset, double volume) async {
+    if (fail) throw StateError('missing asset');
+    plays++;
+  }
+
+  void complete() => completedController.add(null);
+
+  @override
+  Future<void> stop() async {
+    stops++;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposals++;
+    await completedController.close();
   }
 }
 
@@ -74,16 +108,60 @@ void main() {
     audio.dispose();
     restored.dispose();
   });
-  test('duplicate effect bursts are bounded', () async {
-    final backend = Backend();
-    final audio = AudioService(backend, Preferences());
-    await audio.initialize();
-    audio.configure(master: true);
-    for (var i = 0; i < 100; i++) {
-      audio.play(Sound.catchFood);
+  test('two rapid effects use independent players without truncation', () async {
+    final players = <EffectPlayer>[];
+    final pool = EffectPlayerPool(
+      size: 2,
+      createPlayer: () {
+        final player = EffectPlayer();
+        players.add(player);
+        return player;
+      },
+    );
+    expect(await pool.play(Sound.catchFood, .6), isTrue);
+    expect(await pool.play(Sound.bonus, .6), isTrue);
+    expect(players.map((player) => player.plays), [1, 1]);
+    expect(players.every((player) => player.stops == 0), isTrue);
+    await pool.dispose();
+  });
+
+  test('completed players are reused', () async {
+    final players = <EffectPlayer>[];
+    final pool = EffectPlayerPool(
+      size: 1,
+      createPlayer: () {
+        final player = EffectPlayer();
+        players.add(player);
+        return player;
+      },
+    );
+    expect(await pool.play(Sound.catchFood, .6), isTrue);
+    expect(await pool.play(Sound.combo, .6), isFalse);
+    players.single.complete();
+    expect(await pool.play(Sound.combo, .6), isTrue);
+    expect(players.single.plays, 2);
+    await pool.dispose();
+  });
+
+  test('pool exhaustion drops incoming effects and never grows', () async {
+    final players = <EffectPlayer>[];
+    final pool = EffectPlayerPool(
+      size: 4,
+      createPlayer: () {
+        final player = EffectPlayer();
+        players.add(player);
+        return player;
+      },
+    );
+    final accepted = <bool>[];
+    for (var index = 0; index < 100; index++) {
+      accepted.add(await pool.play(Sound.catchFood, .6));
     }
-    expect(backend.effects, 1);
-    audio.dispose();
+    expect(accepted.where((value) => value), hasLength(4));
+    expect(players, hasLength(4));
+    expect(pool.capacity, 4);
+    expect(pool.activeCount, 4);
+    await pool.dispose();
   });
 
   test('master and independent controls apply immediately', () async {
@@ -124,6 +202,19 @@ void main() {
     audio.dispose();
   });
 
+  test('missing effect assets free the slot for later playback', () async {
+    final player = EffectPlayer()..fail = true;
+    final pool = EffectPlayerPool(size: 1, createPlayer: () => player);
+    await expectLater(
+      pool.play(Sound.catchFood, .6),
+      throwsA(isA<StateError>()),
+    );
+    expect(pool.activeCount, 0);
+    player.fail = false;
+    expect(await pool.play(Sound.catchFood, .6), isTrue);
+    await pool.dispose();
+  });
+
   test('dispose releases the backend after pending work', () async {
     final backend = Backend();
     final audio = AudioService(backend, Preferences());
@@ -133,6 +224,28 @@ void main() {
     audio.dispose();
     await Future<void>.delayed(Duration.zero);
     expect(backend.closed, isTrue);
+  });
+
+  test('initialization is idempotent', () async {
+    final preferences = Preferences();
+    final audio = AudioService(Backend(), preferences);
+    await Future.wait([audio.initialize(), audio.initialize()]);
+    expect(preferences.loads, 1);
+    audio.dispose();
+  });
+
+  test('pool disposal is idempotent and a new pool can initialize', () async {
+    final firstPlayer = EffectPlayer();
+    final first = EffectPlayerPool(size: 1, createPlayer: () => firstPlayer);
+    await first.dispose();
+    await first.dispose();
+    expect(firstPlayer.disposals, 1);
+    expect(await first.play(Sound.tap, .6), isFalse);
+
+    final secondPlayer = EffectPlayer();
+    final second = EffectPlayerPool(size: 1, createPlayer: () => secondPlayer);
+    expect(await second.play(Sound.tap, .6), isTrue);
+    await second.dispose();
   });
 
   test('persisted rewards map to their dedicated cues', () {

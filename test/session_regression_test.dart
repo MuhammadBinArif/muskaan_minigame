@@ -3,6 +3,7 @@ import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
 import 'support/player_fixture.dart';
+import 'support/game_completion.dart';
 
 class TestClock implements Stopwatch {
   int milliseconds = 0;
@@ -44,11 +45,16 @@ class RetryRepository implements GameRecordsRepository {
   int calls = 0;
   final Map<int, GameSessionRecord> records = {};
   @override
-  Future<void> saveSession(GameSessionRecord record) async {
+  Future<GameSessionRecord> saveSession(GameSessionRecord record) async {
     calls++;
     if (fail) throw StateError('disk temporarily unavailable');
     records[record.id] = record;
+    return record;
   }
+
+  @override
+  Future<GameSessionRecord?> getSessionById(int sessionId) async =>
+      records[sessionId];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -185,7 +191,7 @@ void main() {
       );
       addTearDown(game.dispose);
       game.startGame();
-      game.quitGame();
+      completeRoundByExhaustingLives(game);
       await game.persistCompletedSession();
       expect(game.state.saveError, isNotNull);
       final record = game.state.completedRecord!;

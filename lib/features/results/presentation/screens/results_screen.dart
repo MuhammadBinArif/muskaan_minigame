@@ -95,9 +95,9 @@ class AppTypography {
 // RESULTS SCREEN
 // ==========================================
 class ResultsScreen extends ConsumerStatefulWidget {
-  final GameSessionRecord? gameRecord;
+  final GameSessionRecord gameRecord;
 
-  const ResultsScreen({super.key, this.gameRecord});
+  const ResultsScreen({super.key, required this.gameRecord});
 
   @override
   ConsumerState<ResultsScreen> createState() => _ResultsScreenState();
@@ -127,7 +127,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final record = widget.gameRecord ?? _emptyRecord();
+    final record = widget.gameRecord;
     ref.listen<List<AchievementUnlock>>(latestAchievementUnlocksProvider, (
       _,
       unlocks,
@@ -200,10 +200,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen>
                 return;
               }
               _replayStarted = true;
-              if (widget.gameRecord == null) {
-                context.go('/countdown');
-                return;
-              }
               ref
                   .read(adServiceProvider)
                   .replay(
@@ -219,24 +215,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen>
     );
   }
 
-  static GameSessionRecord _emptyRecord() {
-    // Presentation-only unavailable state. New rounds must use create(),
-    // which requires ownership.
-    return GameSessionRecord(
-      id: 0,
-      score: 0,
-      livesLost: 0,
-      maxLives: 3,
-      timePlayed: 0,
-      bestCombo: 0,
-      catches: 0,
-      accuracy: 0,
-      smileScore: 0,
-      startedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
-      state: GameSessionState.results,
-      isNewBest: false,
-    );
-  }
 }
 
 // ==========================================
@@ -596,7 +574,7 @@ class _ResultsBodyState extends State<_ResultsBody>
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => context.push('/share'),
+          onTap: () => context.push('/share', extra: widget.record),
           child: const Center(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
