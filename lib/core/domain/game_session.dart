@@ -231,6 +231,38 @@ class GameSessionRecord {
       isNewBest: false, // determined by persistence layer
     );
   }
+
+  /// Returns the canonical record produced by transactional persistence.
+  GameSessionRecord persisted({required int id, required bool isNewBest}) =>
+      GameSessionRecord(
+        playerId: playerId,
+        playerName: playerName,
+        playerAvatar: playerAvatar,
+        smileSampleCount: smileSampleCount,
+        averageSmileProbability: averageSmileProbability,
+        peakSmileProbability: peakSmileProbability,
+        calibratedSmileAttempted: calibratedSmileAttempted,
+        calibratedSmileSampleCount: calibratedSmileSampleCount,
+        averageCalibratedSmileIntensity: averageCalibratedSmileIntensity,
+        peakCalibratedSmileIntensity: peakCalibratedSmileIntensity,
+        calibratedSmileObservationSpanMs: calibratedSmileObservationSpanMs,
+        usedSmileMode: usedSmileMode,
+        usedTouchMode: usedTouchMode,
+        completionTimezoneOffsetMinutes: completionTimezoneOffsetMinutes,
+        id: id,
+        score: score,
+        livesLost: livesLost,
+        maxLives: maxLives,
+        timePlayed: timePlayed,
+        bestCombo: bestCombo,
+        catches: catches,
+        accuracy: accuracy,
+        smileScore: smileScore,
+        startedAt: startedAt,
+        endedAt: endedAt,
+        state: state,
+        isNewBest: isNewBest,
+      );
 }
 
 /// Active food item in the game.
@@ -333,6 +365,25 @@ class GameStats {
     smileScore: 0,
   );
 
+  /// Counts edible opportunities at spawn time. Hazards are not accuracy
+  /// attempts, whether the player hits or avoids them.
+  GameStats recordSpawn(FoodItemType type) {
+    if (type == FoodItemType.tea) return this;
+    final eligible = totalFoodsSpawned + 1;
+    return GameStats(
+      score: score,
+      lives: lives,
+      timeRemaining: timeRemaining,
+      combo: combo,
+      maxCombo: maxCombo,
+      catches: catches,
+      hazardsHit: hazardsHit,
+      totalFoodsSpawned: eligible,
+      accuracy: catches / eligible,
+      smileScore: smileScore,
+    );
+  }
+
   GameStats applyCollision(CollisionEvent event) {
     final isCatch = event.isCatch;
     final points = isCatch ? _pointsFor(event.foodType) : 0;
@@ -340,8 +391,8 @@ class GameStats {
     final newCombo = isCatch ? combo + 1 : 0;
     final newCatches = catches + (isCatch ? 1 : 0);
     final newHazards = hazardsHit + (isCatch ? 0 : 1);
-    final denom = (newCatches + newHazards).clamp(1, 1 << 30);
-    final newAccuracy = newCatches / denom;
+    final newAccuracy =
+        totalFoodsSpawned == 0 ? 0.0 : newCatches / totalFoodsSpawned;
     final newMaxCombo = newCombo > maxCombo ? newCombo : maxCombo;
 
     return GameStats(

@@ -14,6 +14,7 @@ import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provide
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 
 import '../support/ownership_camera.dart';
+import '../support/game_completion.dart';
 
 void main() {
   testWidgets(
@@ -115,7 +116,7 @@ void main() {
       await database.customStatement(
         "CREATE TRIGGER fail_journey_result BEFORE INSERT ON game_records BEGIN SELECT RAISE(FAIL, 'forced journey failure'); END",
       );
-      game.quitGame();
+      completeRoundByExhaustingLives(game);
       await game.persistCompletedSession();
       final original = game.state.completedRecord!;
       expect(original.playerId, playerA.id);

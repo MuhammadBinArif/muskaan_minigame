@@ -16,7 +16,7 @@ class AchievementService {
     required int sourceResultId,
     required DateTime completedAt,
   }) async {
-    final sessions = await records.getAllSessions();
+    final sessions = await records.getPlayerSessions(playerId);
     final existing = await unlocks.getUnlocks(playerId);
     final evaluation = evaluator.evaluate(
       playerId: playerId,
@@ -32,7 +32,7 @@ class AchievementService {
   }
 
   Future<AchievementEvaluation> getProgress(String playerId) async {
-    final sessions = await records.getAllSessions();
+    final sessions = await records.getPlayerSessions(playerId);
     final existing = await unlocks.getUnlocks(playerId);
     var evaluation = evaluator.evaluate(
       playerId: playerId,

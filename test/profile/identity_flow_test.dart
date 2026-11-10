@@ -15,6 +15,7 @@ import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provide
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';
 import '../support/player_fixture.dart';
 import '../support/ownership_camera.dart';
+import '../support/game_completion.dart';
 import '../session_regression_test.dart' show RetryRepository;
 
 void main() {
@@ -208,7 +209,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(game.activePlayerId, owner);
     if (game.state.canResume) game.resumeGame();
-    game.quitGame();
+    completeRoundByExhaustingLives(game);
     await game.persistCompletedSession();
     final saved =
         await container.read(gameRecordsRepositoryProvider).getAllSessions();
@@ -257,7 +258,7 @@ void main() {
     await tester.tap(find.text('Play Touch-Only'));
     await tester.pump();
     expect(game.activePlayerId, owner);
-    game.quitGame();
+    completeRoundByExhaustingLives(game);
     await game.persistCompletedSession();
     final saved =
         await container.read(gameRecordsRepositoryProvider).getAllSessions();
@@ -282,7 +283,7 @@ void main() {
       final playerA = container.read(playerProfileProvider).requireValue;
       final game = container.read(gameSessionProvider.notifier);
       game.startGame();
-      game.quitGame();
+      completeRoundByExhaustingLives(game);
       await game.persistCompletedSession();
       final original = game.state.completedRecord!;
       expect(original.playerId, playerA.id);
@@ -383,7 +384,7 @@ void main() {
           .update(name: 'Smile King', avatar: '👩🏽');
       await tester.pump();
       expect(find.text('👩🏽 Smile King'), findsOneWidget);
-      game.quitGame();
+      completeRoundByExhaustingLives(game);
       await game.persistCompletedSession();
       final result = records.records.values.single;
       expect(result.playerId, profiles.saved.id);

@@ -71,7 +71,9 @@ void main() {
     avatar.sync(state);
     for (var i = 1; i <= 3; i++) {
       state = state.copyWith(
-        stats: state.stats.applyCollision(
+        stats: state.stats
+            .recordSpawn(FoodItemType.gold)
+            .applyCollision(
           const CollisionEvent(
             foodType: FoodItemType.gold,
             mouthX: .5,

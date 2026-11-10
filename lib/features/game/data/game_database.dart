@@ -49,7 +49,7 @@ class GameDatabase extends _$GameDatabase {
   /// ```
   GameDatabase.forTesting(super.executor);
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -60,6 +60,7 @@ class GameDatabase extends _$GameDatabase {
       await _createAchievementTable();
       await _createDailyChallengeTables();
       await _createProgressionTables();
+      await _createRecordIndexes();
     },
     onUpgrade: (m, from, to) async {
       if (from < 2) await _createIdentityTables();
@@ -73,6 +74,10 @@ class GameDatabase extends _$GameDatabase {
         await _createDailyChallengeTables();
       }
       if (from < 7) await _createProgressionTables();
+      if (from < 8) {
+        await _removeLegacyDetailsOwner();
+        await _createRecordIndexes();
+      }
     },
   );
 
@@ -80,8 +85,32 @@ class GameDatabase extends _$GameDatabase {
     await customStatement(
       'CREATE TABLE player_profile (slot INTEGER PRIMARY KEY CHECK(slot = 1), payload TEXT NOT NULL)',
     );
+    await _createSessionDetailsTable();
+  }
+
+  Future<void> _createSessionDetailsTable({
+    String tableName = 'session_details',
+  }) => customStatement(
+    'CREATE TABLE $tableName (session_id INTEGER PRIMARY KEY REFERENCES game_records(id) ON DELETE CASCADE, display_name TEXT, avatar TEXT, smile_samples INTEGER NOT NULL DEFAULT 0, smile_average REAL, smile_peak REAL, calibrated_smile_attempted INTEGER, calibrated_smile_samples INTEGER, calibrated_smile_average REAL, calibrated_smile_peak REAL, calibrated_smile_span_ms INTEGER, used_smile_mode INTEGER, used_touch_mode INTEGER, completion_timezone_offset_minutes INTEGER)',
+  );
+
+  Future<void> _removeLegacyDetailsOwner() async {
     await customStatement(
-      'CREATE TABLE session_details (session_id INTEGER PRIMARY KEY REFERENCES game_records(id) ON DELETE CASCADE, player_id TEXT, display_name TEXT, avatar TEXT, smile_samples INTEGER NOT NULL DEFAULT 0, smile_average REAL, smile_peak REAL, calibrated_smile_attempted INTEGER, calibrated_smile_samples INTEGER, calibrated_smile_average REAL, calibrated_smile_peak REAL, calibrated_smile_span_ms INTEGER, used_smile_mode INTEGER, used_touch_mode INTEGER, completion_timezone_offset_minutes INTEGER)',
+      'ALTER TABLE session_details RENAME TO session_details_v7',
+    );
+    await _createSessionDetailsTable();
+    await customStatement(
+      'INSERT INTO session_details(session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes) SELECT session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes FROM session_details_v7',
+    );
+    await customStatement('DROP TABLE session_details_v7');
+  }
+
+  Future<void> _createRecordIndexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS game_records_player_history ON game_records(player_id, state, started_at DESC, id DESC)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS game_records_player_score ON game_records(player_id, state, score DESC) WHERE ended_at IS NOT NULL',
     );
   }
 
@@ -173,6 +202,14 @@ class GameDatabase extends _$GameDatabase {
               SessionState.gameOver.index,
             ]),
           )
+          ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
+        .get();
+  }
+
+  Future<List<GameRecord>> getCompletedSessionsByIds(List<int> ids) {
+    if (ids.isEmpty) return Future.value(const []);
+    return (select(gameRecords)
+          ..where((t) => t.id.isIn(ids))
           ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
         .get();
   }

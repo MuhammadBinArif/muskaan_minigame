@@ -13,7 +13,7 @@ class ProgressionService {
   static const rules = ProgressionRules();
 
   Future<PlayerProgression> synchronize(String playerId) async {
-    final history = await records.getAllSessions();
+    final history = await records.getPlayerSessions(playerId);
     final owned =
         history
             .where(

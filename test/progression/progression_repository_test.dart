@@ -137,7 +137,7 @@ void main() {
               "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('player_progression_awards', 'player_cosmetic_unlocks')",
             )
             .get();
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
     expect(tables, hasLength(2));
     expect(await records.getAllSessions(), hasLength(1));
   });

@@ -126,8 +126,13 @@ class _T {
 // SCREEN
 // ============================================================
 class GameplayScreen extends ConsumerStatefulWidget {
-  const GameplayScreen({super.key, this.touchOnly = false});
+  const GameplayScreen({
+    super.key,
+    this.touchOnly = false,
+    this.onBuildForTest,
+  });
   final bool touchOnly;
+  final VoidCallback? onBuildForTest;
 
   @override
   ConsumerState<GameplayScreen> createState() => _GameplayScreenState();
@@ -142,11 +147,12 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   late final MuskaanFlameGame _game;
   late final ValueNotifier<FaceGameControlStatus> _controlStatus;
   late final ValueNotifier<MouthTrackingState> _trackingUi;
+  late final ValueNotifier<GameSessionStateData> _presentation;
   ProviderSubscription<MouthTrackingState>? _trackingSubscription;
   GameSessionNotifier? _sessionController;
   bool _disposed = false;
   Timer? _resultTransition;
-  late final ProviderSubscription<GameSessionStateData> _avatarEvents;
+  late final ProviderSubscription<GameSessionStateData> _sessionEvents;
   late bool _touchOnly;
 
   @override
@@ -196,9 +202,10 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
       },
     );
     _game.touchOnly = _touchOnly;
-    _avatarEvents = ref.listenManual<GameSessionStateData>(
+    _presentation = ValueNotifier(ref.read(gameSessionProvider));
+    _sessionEvents = ref.listenManual<GameSessionStateData>(
       gameSessionProvider,
-      (_, next) => _game.avatar.sync(next),
+      _onSessionChanged,
       fireImmediately: true,
     );
     if (!_touchOnly)
@@ -231,11 +238,58 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
   MouthTrackingController? _trackingController;
 
+  void _onSessionChanged(
+    GameSessionStateData? previous,
+    GameSessionStateData next,
+  ) {
+    if (_disposed) return;
+    _game.syncSession(
+      foods: next.activeFoods,
+      recentCollisions: next.recentCollisions,
+      isPlaying: next.state == GameSessionState.playing,
+    );
+    if (previous == null ||
+        previous.state != next.state ||
+        previous.stats.catches != next.stats.catches ||
+        previous.stats.hazardsHit != next.stats.hazardsHit ||
+        previous.stats.combo != next.stats.combo ||
+        previous.missCount != next.missCount) {
+      _game.avatar.sync(next);
+    }
+    if (previous == null || _presentationChanged(previous, next)) {
+      _presentation.value = next;
+    }
+    if (previous?.state != GameSessionState.gameOver &&
+        next.state == GameSessionState.gameOver) {
+      _resultTransition?.cancel();
+      _resultTransition = Timer(
+        MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 600),
+        () {
+          if (mounted) context.go('/game-over');
+        },
+      );
+    }
+  }
+
+  bool _presentationChanged(
+    GameSessionStateData previous,
+    GameSessionStateData next,
+  ) =>
+      previous.state != next.state ||
+      previous.stats.lives != next.stats.lives ||
+      previous.stats.score != next.stats.score ||
+      previous.stats.timeRemaining != next.stats.timeRemaining ||
+      previous.stats.combo != next.stats.combo ||
+      previous.isSaving != next.isSaving ||
+      previous.saveError != next.saveError;
+
   @override
   void dispose() {
     _disposed = true;
     _trackingSubscription?.close();
-    _avatarEvents.close();
+    _sessionEvents.close();
     _resultTransition?.cancel();
     _game.avatar.dispose();
     _game.pauseEngine();
@@ -247,6 +301,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     _sessionController?.leaveGame();
     _trackingUi.dispose();
     _controlStatus.dispose();
+    _presentation.dispose();
     super.dispose();
   }
 
@@ -324,7 +379,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
   Future<void> _startGame() async {
     final session = ref.read(gameSessionProvider);
     if (session.isSaving || session.saveError != null) {
-      context.go('/results');
+      final resultId = session.completedRecord?.id;
+      context.go(resultId == null ? '/results' : '/results?id=$resultId');
       return;
     }
     await ref.read(playerProfileProvider.notifier).ready;
@@ -407,49 +463,31 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
 
   @override
   Widget build(BuildContext context) {
-    final session = ref.watch(gameSessionProvider);
+    widget.onBuildForTest?.call();
     _game.avatar.reducedMotion = MediaQuery.disableAnimationsOf(context);
     _game.avatar.setAvatar(
       resolveAvatarState(ref.watch(profileAvatarProvider)),
     );
-    _game.syncSession(
-      foods: session.activeFoods,
-      recentCollisions: session.recentCollisions,
-      isPlaying: session.state == GameSessionState.playing,
-    );
-
-    ref.listen<GameSessionStateData>(gameSessionProvider, (previous, next) {
-      if (previous?.state != GameSessionState.gameOver &&
-          next.state == GameSessionState.gameOver) {
-        _resultTransition?.cancel();
-        _resultTransition = Timer(
-          MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : const Duration(milliseconds: 600),
-          () {
-            if (mounted) context.go('/game-over');
-          },
-        );
-      }
-    });
     return Scaffold(
       backgroundColor: _C.bgBot,
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          final h = constraints.maxHeight;
+      body: ValueListenableBuilder<GameSessionStateData>(
+        valueListenable: _presentation,
+        builder: (context, session, _) => LayoutBuilder(
+          builder: (context, constraints) {
+            final w = constraints.maxWidth;
+            final h = constraints.maxHeight;
 
-          final gameView =
-              session.state == GameSessionState.playing ||
-                      session.state == GameSessionState.paused ||
-                      session.state == GameSessionState.gameOver
-                  ? _buildActiveGame(session)
-                  : _buildDemoView(w, h, session);
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              Positioned.fill(child: gameView),
-              Positioned(
+            final gameView =
+                session.state == GameSessionState.playing ||
+                        session.state == GameSessionState.paused ||
+                        session.state == GameSessionState.gameOver
+                    ? _buildActiveGame(session)
+                    : _buildDemoView(w, h, session);
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(child: gameView),
+                Positioned(
                 bottom: 70,
                 left: 16,
                 right: 16,
@@ -483,8 +521,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                     ],
                   ),
                 ),
-              ),
-              Positioned(
+                ),
+                Positioned(
                 right: 12,
                 top: MediaQuery.paddingOf(context).top + 8,
                 child: TextButton.icon(
@@ -492,8 +530,8 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                   icon: Icon(_touchOnly ? Icons.camera_alt : Icons.touch_app),
                   label: Text(_touchOnly ? 'Smile mode' : 'Touch mode'),
                 ),
-              ),
-              ValueListenableBuilder<MouthTrackingState>(
+                ),
+                ValueListenableBuilder<MouthTrackingState>(
                 valueListenable: _trackingUi,
                 builder: (context, trackingState, _) {
                   if (_touchOnly ||
@@ -535,10 +573,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                     ),
                   );
                 },
-              ),
-            ],
-          );
-        },
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

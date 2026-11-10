@@ -54,9 +54,116 @@ abstract class AudioBackend {
   Future<void> dispose();
 }
 
+abstract class EffectPlayback {
+  Stream<void> get completed;
+  Future<void> play(String asset, double volume);
+  Future<void> stop();
+  Future<void> dispose();
+}
+
+class AudioPlayerEffectPlayback implements EffectPlayback {
+  AudioPlayerEffectPlayback() : _player = AudioPlayer();
+  final AudioPlayer _player;
+
+  @override
+  Stream<void> get completed => _player.onPlayerComplete;
+
+  @override
+  Future<void> play(String asset, double volume) async {
+    await _player.setReleaseMode(ReleaseMode.stop);
+    await _player.play(AssetSource(asset), volume: volume);
+  }
+
+  @override
+  Future<void> stop() => _player.stop();
+
+  @override
+  Future<void> dispose() => _player.dispose();
+}
+
+typedef EffectPlaybackFactory = EffectPlayback Function();
+
+/// A fixed-size, completion-driven pool. When every slot is active, the new
+/// effect is dropped; an effect already playing is never truncated for reuse.
+class EffectPlayerPool {
+  EffectPlayerPool({
+    int size = 4,
+    EffectPlaybackFactory? createPlayer,
+  }) : assert(size > 0),
+       _slots = List.generate(
+         size,
+         (_) => _EffectSlot((createPlayer ?? AudioPlayerEffectPlayback.new)()),
+       );
+
+  final List<_EffectSlot> _slots;
+  bool _disposed = false;
+
+  int get capacity => _slots.length;
+  int get activeCount => _slots.where((slot) => slot.busy).length;
+
+  Future<bool> play(Sound sound, double volume) async {
+    if (_disposed) return false;
+    _EffectSlot? available;
+    for (final slot in _slots) {
+      if (!slot.busy) {
+        available = slot;
+        break;
+      }
+    }
+    if (available == null) return false;
+    available.busy = true;
+    try {
+      await available.player.play('audio/sfx/${sound.name}.wav', volume);
+      return true;
+    } catch (_) {
+      available.busy = false;
+      rethrow;
+    }
+  }
+
+  Future<void> silence() async {
+    if (_disposed) return;
+    await Future.wait(
+      _slots.map((slot) async {
+        slot.busy = false;
+        await slot.player.stop();
+      }),
+    );
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    await Future.wait(
+      _slots.map((slot) async {
+        await slot.completion.cancel();
+        await slot.player.dispose();
+      }),
+    );
+  }
+}
+
+class _EffectSlot {
+  _EffectSlot(this.player) {
+    completion = player.completed.listen((_) => busy = false);
+  }
+
+  final EffectPlayback player;
+  late final StreamSubscription<void> completion;
+  bool busy = false;
+}
+
 class PlayerAudioBackend implements AudioBackend {
+  PlayerAudioBackend({
+    int effectPoolSize = 4,
+    EffectPlaybackFactory? createEffectPlayer,
+  }) : _effects = EffectPlayerPool(
+         size: effectPoolSize,
+         createPlayer: createEffectPlayer,
+       );
+
   final _music = AudioPlayer();
-  final _effects = AudioPlayer();
+  final EffectPlayerPool _effects;
   String? _track;
   double _appliedMusicVolume = 0;
   bool _musicPlaying = false;
@@ -102,15 +209,11 @@ class PlayerAudioBackend implements AudioBackend {
 
   @override
   Future<void> effect(Sound sound, double volume) async {
-    await _effects.stop();
-    await _effects.play(
-      AssetSource('audio/sfx/${sound.name}.wav'),
-      volume: volume,
-    );
+    await _effects.play(sound, volume);
   }
 
   @override
-  Future<void> silenceEffects() => _effects.stop();
+  Future<void> silenceEffects() => _effects.silence();
 
   @override
   Future<void> dispose() async {
@@ -150,11 +253,9 @@ class AudioService extends ChangeNotifier with WidgetsBindingObserver {
   final AudioPreferences preferences;
   bool enabled = false, musicEnabled = true, effectsEnabled = true;
   double musicVolume = .35, effectsVolume = .6;
-  bool _active = true, _disposed = false, _effectBusy = false;
-  final List<Sound> _pendingEffects = [];
-  int _activePriority = -1;
+  bool _active = true, _disposed = false;
   String? _track = 'menu';
-  DateTime? _lastEffect;
+  final Set<Future<void>> _effectTasks = {};
   Future<void> _pending = Future.value();
   Future<void>? _initialization;
   Timer? _saveTimer;
@@ -206,7 +307,6 @@ class AudioService extends ChangeNotifier with WidgetsBindingObserver {
       'effectsVolume': effectsVolume,
     };
     if (!enabled || !effectsEnabled) {
-      _pendingEffects.clear();
       _enqueue(backend.silenceEffects);
     }
     _sync();
@@ -268,57 +368,28 @@ class AudioService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> get settled async {
     await (_saveCompleter?.future ?? Future<void>.value());
     await _pending;
+    await Future.wait(_effectTasks.toList());
   }
 
   void play(Sound sound) {
     if (_disposed || !enabled || !effectsEnabled || !_active) return;
-    final now = DateTime.now();
-    if (_lastEffect != null &&
-        now.difference(_lastEffect!) < const Duration(milliseconds: 80) &&
-        _priority(sound) <= _activePriority) {
-      return;
-    }
-    _lastEffect = now;
-    if (_effectBusy) {
-      if (!_pendingEffects.contains(sound)) {
-        _pendingEffects.add(sound);
-        _pendingEffects.sort((a, b) => _priority(b).compareTo(_priority(a)));
-        if (_pendingEffects.length > 6) _pendingEffects.removeLast();
-      }
-      return;
-    }
-    unawaited(_playEffects(sound));
+    late final Future<void> task;
+    task = _playEffect(sound).whenComplete(() => _effectTasks.remove(task));
+    _effectTasks.add(task);
+    unawaited(task);
   }
 
-  Future<void> _playEffects(Sound first) async {
-    _effectBusy = true;
-    var sound = first;
-    while (!_disposed) {
-      _activePriority = _priority(sound);
-      try {
-        await backend.effect(sound, effectsVolume);
-      } catch (_) {
-        error = 'Sound unavailable.';
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      if (_pendingEffects.isEmpty) break;
-      sound = _pendingEffects.removeAt(0);
+  Future<void> _playEffect(Sound sound) async {
+    try {
+      await backend.effect(sound, effectsVolume);
+    } catch (_) {
+      error = 'Sound unavailable.';
     }
-    _activePriority = -1;
-    _effectBusy = false;
   }
-
-  static int _priority(Sound sound) => switch (sound) {
-    Sound.gameOver || Sound.best || Sound.achievement || Sound.level => 3,
-    Sound.hazard || Sound.challenge || Sound.cosmetic || Sound.start => 2,
-    Sound.combo || Sound.bonus || Sound.catchFood || Sound.miss => 1,
-    _ => 0,
-  };
 
   void handleInterruption(bool began) {
     _active = !began;
     if (began) {
-      _pendingEffects.clear();
       _enqueue(backend.silenceEffects);
     }
     _sync();
@@ -331,6 +402,7 @@ class AudioService extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _saveTimer?.cancel();
     final preferencesToSave = _pendingPreferences;
     _pendingPreferences = null;
@@ -347,6 +419,7 @@ class AudioService extends ChangeNotifier with WidgetsBindingObserver {
             if (!(_saveCompleter?.isCompleted ?? true)) {
               _saveCompleter!.complete();
             }
+            await Future.wait(_effectTasks.toList());
             await backend.dispose();
           })
           .catchError((Object _) {}),

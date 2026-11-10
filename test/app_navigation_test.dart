@@ -860,59 +860,25 @@ void main() {
       expect(find.text('250 ms'), findsOneWidget);
     });
 
-    testWidgets('renders all key elements', (tester) async {
-      await pumpApp(tester, '/results');
-
-      expect(find.text('SESSION COMPLETE'), findsOneWidget);
-      expect(find.text('This Round'), findsOneWidget);
-
-      // Stat labels are always present.
-      expect(find.text('Catches'), findsOneWidget);
-      expect(find.text('Best Combo'), findsOneWidget);
-      expect(find.text('Accuracy'), findsOneWidget);
-      expect(find.text('Time'), findsOneWidget);
-      expect(find.text('Smile Measurements'), findsOneWidget);
-
-      // Actions.
-      expect(find.text('PLAY AGAIN'), findsOneWidget);
-      expect(find.text('SHARE RESULT'), findsOneWidget);
-
-      // No NEW BEST badge on an empty record.
-      expect(find.text('NEW BEST!'), findsNothing);
-    });
-
-    testWidgets('score count-up finishes for the active record', (
+    testWidgets('direct results navigation has no fabricated fallback', (
       tester,
     ) async {
       await pumpApp(tester, '/results');
-
-      // Advance past the 1.4 s count-up so the score settles.
-      await tester.pump(const Duration(milliseconds: 1500));
-      await tester.pump(const Duration(milliseconds: 200));
-
-      // The empty fallback record has score 0; two "0" widgets exist
-      // (score + catches count).
-      expect(find.text('0'), findsWidgets);
-      expect(find.text('SESSION COMPLETE'), findsOneWidget);
+      expect(find.text('Result unavailable'), findsOneWidget);
+      expect(find.text('SESSION COMPLETE'), findsNothing);
     });
 
-    testWidgets('PLAY AGAIN navigates to Countdown', (tester) async {
+    testWidgets('invalid result ID is unavailable', (tester) async {
+      await pumpApp(tester, '/results?id=not-a-number');
+      expect(find.text('Result unavailable'), findsOneWidget);
+    });
+
+    testWidgets('unavailable result can return Home', (tester) async {
       await pumpApp(tester, '/results');
-      await tapAndAdvance(tester, find.text('PLAY AGAIN'));
-
-      expect(find.text('3'), findsOneWidget);
-      expect(find.text('GET READY...'), findsOneWidget);
+      await tapAndAdvance(tester, find.text('GO HOME'));
+      expect(find.text('Good evening,'), findsOneWidget);
     });
 
-    testWidgets('SHARE RESULT button is tappable', (tester) async {
-      await pumpApp(tester, '/results');
-
-      await tester.tap(find.text('SHARE RESULT'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      expect(find.text('SESSION COMPLETE'), findsOneWidget);
-    });
   });
 
   // ================================================================
@@ -1357,7 +1323,7 @@ void main() {
     });
 
     test('gold catch adds 100 points and bumps combo', () {
-      final s = GameStats.initial().applyCollision(
+      final s = GameStats.initial().recordSpawn(FoodItemType.gold).applyCollision(
         const CollisionEvent(
           foodType: FoodItemType.gold,
           mouthX: 0,
@@ -1377,7 +1343,7 @@ void main() {
     });
 
     test('tea hazard costs a life, resets combo, keeps maxCombo', () {
-      var s = GameStats.initial().applyCollision(
+      var s = GameStats.initial().recordSpawn(FoodItemType.gold).applyCollision(
         const CollisionEvent(
           foodType: FoodItemType.gold,
           mouthX: 0,
@@ -1401,11 +1367,11 @@ void main() {
       expect(s.maxCombo, 1);
       expect(s.catches, 1);
       expect(s.hazardsHit, 1);
-      expect(s.accuracy, 0.5);
+      expect(s.accuracy, 1.0);
     });
 
     test('teal catch is worth 75', () {
-      final s = GameStats.initial().applyCollision(
+      final s = GameStats.initial().recordSpawn(FoodItemType.teal).applyCollision(
         const CollisionEvent(
           foodType: FoodItemType.teal,
           mouthX: 0,
@@ -1444,7 +1410,7 @@ void main() {
     test('smileScore is always within 0–100', () {
       var s = GameStats.initial();
       for (var i = 0; i < 20; i++) {
-        s = s.applyCollision(
+        s = s.recordSpawn(FoodItemType.gold).applyCollision(
           const CollisionEvent(
             foodType: FoodItemType.gold,
             mouthX: 0,

@@ -20,6 +20,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
 
+enum _RoundOutcome { none, active, completed, abandoned }
+
 /// Provider that exposes the current game session state
 final gameSessionProvider =
     StateNotifierProvider<GameSessionNotifier, GameSessionStateData>((ref) {
@@ -61,18 +63,9 @@ final gameSessionProvider =
           if (unlocks.isNotEmpty) {
             ref.read(latestAchievementUnlocksProvider.notifier).state = unlocks;
           }
-          var personalBest = false;
+          final personalBest = record.isNewBest;
           var challengeEarned = false;
           try {
-            final history = await repository.getAllSessions();
-            final previous = history.where(
-              (item) => item.playerId == playerId && item.id != record.id,
-            );
-            final previousBest = previous.fold<int>(
-              0,
-              (best, item) => item.score > best ? item.score : best,
-            );
-            personalBest = record.score > previousBest;
             challengeEarned = await ref
                 .read(dailyChallengeServiceProvider)
                 .newlyCompletedByResult(playerId: playerId, result: record);
@@ -234,6 +227,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   bool _hasPersisted = false;
   Future<void>? _saveInFlight;
   GameSessionRecord? _session;
+  _RoundOutcome _roundOutcome = _RoundOutcome.none;
   int _lastTickMs = 0;
   bool _biteConsumed = false;
   String? get activePlayerId => _session?.playerId;
@@ -294,7 +288,10 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
       creationTime: _gameStopwatch.elapsedMilliseconds,
     );
 
-    state = state.copyWith(activeFoods: [...state.activeFoods, food]);
+    state = state.copyWith(
+      activeFoods: [...state.activeFoods, food],
+      stats: state.stats.recordSpawn(type),
+    );
   }
 
   FoodItemType _getRandomFoodType() {
@@ -366,11 +363,32 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   }
 
   void _endGame() {
-    if (state.state == GameSessionState.gameOver) return;
+    if (_roundOutcome != _RoundOutcome.active ||
+        (state.state != GameSessionState.playing &&
+            state.state != GameSessionState.paused)) {
+      return;
+    }
+
+    // Claim the terminal outcome before creating the result. Route disposal,
+    // timer callbacks, and collision callbacks can now only observe completion.
+    _roundOutcome = _RoundOutcome.completed;
 
     sound?.call(Sound.gameOver);
     music?.call('results');
     _gameStopwatch.stop();
+    var finalStats = state.stats;
+    var finalMisses = state.missCount;
+    for (final food in state.activeFoods) {
+      if (food.type != FoodItemType.tea) {
+        finalStats = finalStats.applyMiss();
+        finalMisses++;
+      }
+    }
+    state = state.copyWith(
+      stats: finalStats,
+      missCount: finalMisses,
+      activeFoods: const [],
+    );
     final record = getGameResults();
     state = state.copyWith(
       completedRecord: record,
@@ -410,13 +428,17 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
   Future<void> _saveRecord(GameSessionRecord record) async {
     try {
-      await repository!.saveSession(record);
+      final persisted = await repository!.saveSession(record);
       if (mounted && state.completedRecord?.id == record.id) {
         _hasPersisted = true;
-        state = state.copyWith(isSaving: false, clearSaveError: true);
+        state = state.copyWith(
+          completedRecord: persisted,
+          isSaving: false,
+          clearSaveError: true,
+        );
       }
       final callback = onResultPersisted;
-      if (callback != null) unawaited(_notifyPersisted(callback, record));
+      if (callback != null) unawaited(_notifyPersisted(callback, persisted));
     } catch (error) {
       if (mounted && state.completedRecord?.id == record.id) {
         state = state.copyWith(
@@ -472,6 +494,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     _resetGame();
     _hasPersisted = false;
     _session = ownedSession;
+    _roundOutcome = _RoundOutcome.active;
     _lastTickMs = 0;
     _biteConsumed = false;
     state = GameSessionStateData.initial();
@@ -538,43 +561,30 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     );
   }
 
-  /// Stop work immediately; publish route-exit state after widget disposal.
+  /// Stop work immediately when the gameplay route is left.
+  ///
+  /// Disposal is an abandonment boundary, never evidence of a completed round.
   void leaveGame() {
+    abandonGame();
+  }
+
+  /// Voluntarily abandon the active round without producing a result.
+  void abandonGame() {
+    if (_roundOutcome != _RoundOutcome.active) return;
+    _roundOutcome = _RoundOutcome.abandoned;
     _foodSpawnTimer?.cancel();
     _gameTickTimer?.cancel();
     _gameStopwatch.stop();
-    final leaving = _session;
-    scheduleMicrotask(() {
-      if (mounted && identical(_session, leaving)) quitGame();
-    });
+    _isInitialized = false;
+    _session = null;
+    _calibratedSmileCollector = null;
+    _lastSmileAt = null;
+    _biteConsumed = false;
+    state = GameSessionStateData.initial();
   }
 
-  /// Quit current game session
-  void quitGame() {
-    if (state.state == GameSessionState.ready) return;
-    if (state.state == GameSessionState.gameOver ||
-        state.state == GameSessionState.results) {
-      return;
-    }
-    // End the game if currently playing
-    if (state.state == GameSessionState.playing ||
-        state.state == GameSessionState.paused) {
-      _endGame();
-    }
-
-    state = state.copyWith(
-      state: GameSessionState.ready,
-      isPaused: false,
-      isGameOver: false,
-      isPlaying: false,
-      isReady: true,
-    );
-
-    // Cancel timers
-    _foodSpawnTimer?.cancel();
-    _gameTickTimer?.cancel();
-    _gameStopwatch.stop();
-  }
+  /// Backwards-compatible UI command. Quitting is voluntary abandonment.
+  void quitGame() => abandonGame();
 
   /// Check and process food catching/hazard interactions based on the mouth state.
   ///

@@ -14,6 +14,7 @@ import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/smile/domain/smile_measurement.dart';
 import '../support/player_fixture.dart';
+import '../support/game_completion.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -174,7 +175,7 @@ void main() {
       }
       expect(game.state.stats.score, 0);
       player = player.copyWith(displayName: 'Smile King', avatar: '👩🏽');
-      game.quitGame();
+      completeRoundByExhaustingLives(game);
       await game.persistCompletedSession();
       final record = (await repository.getAllSessions()).single;
       expect(record.playerId, player.id);
@@ -224,7 +225,7 @@ void main() {
       await db.customStatement(
         "CREATE TRIGGER fail_first_result BEFORE INSERT ON game_records BEGIN SELECT RAISE(FAIL, 'forced insert failure'); END",
       );
-      game.quitGame();
+      completeRoundByExhaustingLives(game);
       await game.persistCompletedSession();
       final original = game.state.completedRecord!;
       expect(original.playerId, playerA.id);

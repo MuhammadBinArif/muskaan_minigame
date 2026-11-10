@@ -49,7 +49,7 @@ void main() {
       expect(history.single.averageCalibratedSmileIntensity, isNull);
       expect(history.single.calibratedSmileAttempted, isNull);
       expect(profile.id, isNotEmpty);
-      expect(database.schemaVersion, 7);
+      expect(database.schemaVersion, 8);
     },
   );
   test('v2 migration adds nullable result ownership without changing history', () async {
@@ -100,7 +100,7 @@ void main() {
     final integrity =
         await database.customSelect('PRAGMA integrity_check').getSingle();
     expect(integrity.data.values.single, 'ok');
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
   });
   test(
     'schema v2 restores names and avatars across a real connection restart',
@@ -124,7 +124,7 @@ void main() {
       expect(restored.avatar, '👩🏽');
     },
   );
-  test('v3 to v5 migration preserves history and adds achievement storage', () async {
+  test('v3 to v8 migration preserves history and adds later storage', () async {
     final executor = NativeDatabase.memory(
       setup: (database) {
         database.execute('''CREATE TABLE game_records (
@@ -162,7 +162,7 @@ void main() {
     expect(history.single.calibratedSmileSampleCount, isNull);
     expect(history.single.averageCalibratedSmileIntensity, isNull);
     expect(history.single.peakCalibratedSmileIntensity, isNull);
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
     final achievementTable =
         await database
             .customSelect(
@@ -175,7 +175,7 @@ void main() {
     expect(integrity.data.values.single, 'ok');
   });
 
-  test('v4 to v6 migration preserves results and adds local progress tables', () async {
+  test('v4 to v8 migration preserves results and adds local progress tables', () async {
     final executor = NativeDatabase.memory(
       setup: (database) {
         database.execute('''CREATE TABLE game_records (
@@ -218,7 +218,7 @@ void main() {
     expect(integrity.data.values.single, 'ok');
   });
 
-  test('v5 to v7 migration preserves unlocks and adds later features', () async {
+  test('v5 to v8 migration preserves unlocks and adds later features', () async {
     final executor = NativeDatabase.memory(
       setup: (database) {
         database.execute('''CREATE TABLE game_records (
@@ -268,10 +268,10 @@ void main() {
             )
             .get();
     expect(tables, hasLength(2));
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
   });
 
-  test('v6 to v7 migration preserves engagement and adds progression', () async {
+  test('v6 to v8 migration preserves engagement and adds progression', () async {
     final executor = NativeDatabase.memory(
       setup: (database) {
         database.execute('''CREATE TABLE game_records (
@@ -331,6 +331,6 @@ void main() {
             )
             .get();
     expect(tables, hasLength(2));
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
   });
 }

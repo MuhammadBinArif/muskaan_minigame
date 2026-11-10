@@ -89,12 +89,14 @@ class ShareSheetScreen extends StatefulWidget {
 
   /// Best combo achieved (e.g. "x5").
   final String combo;
+  final int? resultId;
 
   const ShareSheetScreen({
     super.key,
     this.score = 8420,
     this.isNewBest = true,
     this.combo = 'x5',
+    this.resultId,
   });
 
   @override
@@ -117,7 +119,9 @@ class _ShareSheetScreenState extends State<ShareSheetScreen>
     if (context.canPop()) {
       context.pop();
     } else {
-      context.go('/results');
+      context.go(
+        widget.resultId == null ? '/results' : '/results?id=${widget.resultId}',
+      );
     }
   }
 

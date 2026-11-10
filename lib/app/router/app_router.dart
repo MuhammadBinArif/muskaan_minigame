@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
+import 'package:muskaan_minigame/core/domain/game_session.dart';
+import 'package:muskaan_minigame/features/game/data/records_repository.dart';
+import 'package:muskaan_minigame/features/profile/data/player_profile_repository.dart';
 
 // ────────────────────────────────────────────────────────────
 // 01 – 05   Onboarding
@@ -161,8 +164,27 @@ GoRouter createRouter({String initialLocation = '/'}) {
       ),
 
       // ───── 16 – 17  Results, Share ─────
-      GoRoute(path: '/results', builder: (_, _) => const _ResultsRouteBridge()),
-      GoRoute(path: '/share', builder: (_, _) => const ShareSheetScreen()),
+      GoRoute(
+        path: '/results',
+        builder:
+            (_, state) => _ResultsRouteBridge(
+              resultId: int.tryParse(state.uri.queryParameters['id'] ?? ''),
+            ),
+      ),
+      GoRoute(
+        path: '/share',
+        builder: (_, state) {
+          final record = state.extra;
+          return record is GameSessionRecord
+              ? ShareSheetScreen(
+                score: record.score,
+                isNewBest: record.isNewBest,
+                combo: 'x${record.bestCombo}',
+                resultId: record.id,
+              )
+              : const ShareSheetScreen();
+        },
+      ),
 
       // ───── 18  Smile Spotlight ─────
       GoRoute(
@@ -205,23 +227,68 @@ class _GameOverRouteBridge extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(gameSessionProvider);
+    final resultId = session.completedRecord?.id;
     return GameOverScreen(
-      nextRoute: '/results',
+      nextRoute: resultId == null ? '/results' : '/results?id=$resultId',
       gameRecord: session.completedRecord,
     );
   }
 }
 
-/// Reads the current game session and renders Results with real data.
+/// Resolves a completed result by ID and verifies ownership before rendering it.
 class _ResultsRouteBridge extends ConsumerWidget {
-  const _ResultsRouteBridge();
+  const _ResultsRouteBridge({required this.resultId});
+
+  final int? resultId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final id = resultId;
+    if (id == null || id <= 0) return const _ResultUnavailable();
+
     final session = ref.watch(gameSessionProvider);
+    final profile = ref.watch(playerProfileProvider);
+    final activePlayer = profile.asData?.value;
+    if (profile.isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (activePlayer == null) return const _ResultUnavailable();
+
+    final pending = session.completedRecord;
+    if ((session.isSaving || session.saveError != null) &&
+        pending?.id == id &&
+        _isOwnedCompletion(pending!, activePlayer.id)) {
+      return _resultWithSaveStatus(ref, session, pending!);
+    }
+
+    final persisted = ref.watch(resultByIdProvider(id));
+    return persisted.when(
+      loading:
+          () => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+      error: (_, _) => const _ResultUnavailable(),
+      data:
+          (record) =>
+              record != null && _isOwnedCompletion(record, activePlayer.id)
+                  ? ResultsScreen(gameRecord: record)
+                  : const _ResultUnavailable(),
+    );
+  }
+
+  static bool _isOwnedCompletion(GameSessionRecord record, String playerId) =>
+      record.playerId == playerId &&
+      record.state == GameSessionState.results &&
+      record.endedAt != null;
+
+  static Widget _resultWithSaveStatus(
+    WidgetRef ref,
+    GameSessionStateData session,
+    GameSessionRecord record,
+  ) {
     return Stack(
       children: [
-        ResultsScreen(gameRecord: session.completedRecord),
+        ResultsScreen(gameRecord: record),
         if (session.isSaving || session.saveError != null)
           Positioned(
             left: 16,
@@ -261,6 +328,49 @@ class _ResultsRouteBridge extends ConsumerWidget {
       ],
     );
   }
+}
+
+class _ResultUnavailable extends StatelessWidget {
+  const _ResultUnavailable();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    key: const Key('result-unavailable'),
+    backgroundColor: const Color(0xFF0D0D1A),
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.receipt_long, color: Colors.white70, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                'Result unavailable',
+                style: TextStyle(color: Colors.white, fontSize: 22),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'This result is missing, incomplete, or belongs to another player.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () => context.go('/home'),
+                child: const Text('GO HOME'),
+              ),
+              TextButton(
+                onPressed: () => context.go('/smile-analytics'),
+                child: const Text('VIEW HISTORY'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// Global router used by `main.dart`.
