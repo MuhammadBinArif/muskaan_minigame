@@ -10,6 +10,7 @@ enum FaceTrackingStatus { searching, tracking, temporarilyLost, lost }
 /// horizontal coordinate is mirrored once for the front camera so movement
 /// follows the player's on-screen reflection.
 class FaceTrackingObservation {
+  final double? smileProbability;
   final bool faceDetected;
   final int faceCount;
   final Offset? facePosition;
@@ -19,6 +20,7 @@ class FaceTrackingObservation {
   final DateTime capturedAt;
 
   const FaceTrackingObservation({
+    this.smileProbability,
     required this.faceDetected,
     required this.faceCount,
     required this.facePosition,

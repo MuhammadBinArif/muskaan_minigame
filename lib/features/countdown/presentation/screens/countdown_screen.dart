@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:muskaan_minigame/features/audio/audio_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -44,7 +46,7 @@ class AppTypography {
 // ==========================================
 // COUNTDOWN SCREEN
 // ==========================================
-class CountdownScreen extends StatefulWidget {
+class CountdownScreen extends ConsumerStatefulWidget {
   /// Where to navigate once the countdown reaches GO.
   final String nextRoute;
 
@@ -54,10 +56,10 @@ class CountdownScreen extends StatefulWidget {
   const CountdownScreen({super.key, this.nextRoute = '/game', this.from = 3});
 
   @override
-  State<CountdownScreen> createState() => _CountdownScreenState();
+  ConsumerState<CountdownScreen> createState() => _CountdownScreenState();
 }
 
-class _CountdownScreenState extends State<CountdownScreen>
+class _CountdownScreenState extends ConsumerState<CountdownScreen>
     with SingleTickerProviderStateMixin {
   /// Current number displayed. 0 = GO.
   late int _count;
@@ -74,6 +76,7 @@ class _CountdownScreenState extends State<CountdownScreen>
     super.initState();
 
     _count = widget.from;
+    ref.read(audioServiceProvider).play(Sound.countdown);
 
     _pulse = AnimationController(
       vsync: this,
@@ -86,6 +89,7 @@ class _CountdownScreenState extends State<CountdownScreen>
     // ("GO"), we navigate on the next frame.
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
+      if (_count > 1) ref.read(audioServiceProvider).play(Sound.countdown);
       if (_count <= 1) {
         _tick?.cancel();
         setState(() => _count = 0); // show "GO"

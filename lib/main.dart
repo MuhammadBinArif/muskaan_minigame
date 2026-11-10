@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router/app_router.dart';
 import 'features/ads/ad_service.dart';
+import 'features/audio/audio_service.dart';
 
 /// Emoji font families to try, in order, before Skia falls back to
 /// its placeholder (.notdef) glyph.
@@ -107,6 +108,20 @@ class MuskaanApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     unawaited(ref.read(adServiceProvider).initialize());
     return MaterialApp.router(
+      builder:
+          (context, child) => AudioRouteScope(
+            routes: appRouter.routeInformationProvider,
+            path: () => appRouter.routeInformationProvider.value.uri.path,
+            child: AudioInteractionScope(
+              allowFeedback: () {
+                final path = appRouter.routeInformationProvider.value.uri.path;
+                return path != '/game' &&
+                    path != '/games' &&
+                    path != '/countdown';
+              },
+              child: child ?? const SizedBox.shrink(),
+            ),
+          ),
       title: 'Muskaan Minigame',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),

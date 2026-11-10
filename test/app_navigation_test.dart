@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:flutter/material.dart';
+import 'support/player_fixture.dart';
+import 'package:muskaan_minigame/features/profile/data/player_profile_repository.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +11,8 @@ import 'package:camera/camera.dart';
 import 'package:muskaan_minigame/app/router/app_router.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
+import 'package:muskaan_minigame/features/challenges/application/daily_challenge_service.dart';
+import 'package:muskaan_minigame/features/challenges/domain/daily_challenge.dart';
 import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
 import 'package:muskaan_minigame/features/face_detection/domain/face_detection_result.dart';
 import 'package:muskaan_minigame/features/face_detection/domain/face_detection_service.dart';
@@ -35,6 +39,32 @@ class NavigationFaceService implements FaceDetectionService {
   Future<void> dispose() async {}
 }
 
+DailyEngagementState _navigationEngagement() {
+  DailyChallengeDefinition definition(DailyChallengeId id) =>
+      dailyChallengeDefinitions.singleWhere((item) => item.id == id);
+  return DailyEngagementState(
+    dateKey: '2026-11-09',
+    streak: const PlayerStreak(current: 2, longest: 4, activeDayCount: 5),
+    challenges: [
+      DailyChallengeProgress(
+        definition: definition(DailyChallengeId.completeOneRound),
+        progress: 1,
+        available: true,
+      ),
+      DailyChallengeProgress(
+        definition: definition(DailyChallengeId.scoreTarget),
+        progress: 320,
+        available: true,
+      ),
+      DailyChallengeProgress(
+        definition: definition(DailyChallengeId.calibratedPeak),
+        progress: 0,
+        available: false,
+      ),
+    ],
+  );
+}
+
 void main() {
   /// Pumps the app on a portrait mobile viewport.
   /// Uses `pump(Duration)` instead of `pumpAndSettle()` because several
@@ -54,6 +84,13 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          playerProfileRepositoryProvider.overrideWithValue(
+            MemoryPlayerRepository(),
+          ),
+          allRecordsStreamProvider.overrideWith((ref) => Stream.value([])),
+          dailyEngagementProvider(
+            createTestPlayer().id,
+          ).overrideWith((ref) async => _navigationEngagement()),
           calibrationConfigProvider.overrideWith(
             (ref) => const CalibrationConfig(
               closedBaseline: .02,
@@ -89,14 +126,29 @@ void main() {
   // ONBOARDING & NAVIGATION  (Screens 01 – 05)
   // ================================================================
   group('Onboarding & Navigation Tests', () {
-    testWidgets('Splash renders and auto-navigates to Welcome', (tester) async {
+    testWidgets('Splash renders and opens first-launch player setup', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(390 * 3, 844 * 3);
       tester.view.devicePixelRatio = 3.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final router = createRouter(initialLocation: '/');
-      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            playerProfileRepositoryProvider.overrideWithValue(
+              MemoryPlayerRepository(
+                profile: MemoryPlayerRepository().saved.copyWith(
+                  onboarded: false,
+                ),
+              ),
+            ),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pump();
 
       expect(find.text('MUSKAAN PK'), findsOneWidget);
@@ -106,7 +158,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
 
-      expect(find.text('Catch. Smile. Win!'), findsOneWidget);
+      expect(
+        find.text('Meet your player! Keep this name or choose your own.'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Welcome → Step 1 via SEE HOW IT WORKS', (tester) async {
@@ -262,7 +317,7 @@ void main() {
       await pumpApp(tester, '/home');
 
       expect(find.text('Good evening,'), findsOneWidget);
-      expect(find.text('Arjun 👋'), findsOneWidget);
+      expect(find.text('🥷 Happy Panda'), findsOneWidget);
       expect(find.text('Street Food Rush'), findsOneWidget);
       expect(find.text('Smile Spotlight'), findsOneWidget);
       expect(find.text('Practice Mode'), findsOneWidget);
@@ -283,7 +338,7 @@ void main() {
       await tapAndAdvance(tester, find.text('Challenges'));
 
       // ChallengesScreen header is unique.
-      expect(find.text('Challenges 🏆'), findsOneWidget);
+      expect(find.text('Daily Challenges'), findsOneWidget);
     });
 
     // Robust: verify navigation happened by checking we LEFT Home.
@@ -334,7 +389,7 @@ void main() {
       await pumpApp(tester, '/home');
       await tapAndAdvance(tester, find.text('7 streak'));
 
-      expect(find.text('Challenges 🏆'), findsOneWidget);
+      expect(find.text('Daily Challenges'), findsOneWidget);
     });
   });
 
@@ -373,7 +428,7 @@ void main() {
       await pumpApp(tester, '/home-first-time');
       await tapAndAdvance(tester, find.text('Challenges'));
 
-      expect(find.text('Challenges 🏆'), findsOneWidget);
+      expect(find.text('Daily Challenges'), findsOneWidget);
     });
 
     // Robust: verify we LEFT Home First Time.
@@ -746,7 +801,15 @@ void main() {
       );
 
       await tester.pumpWidget(
-        ProviderScope(child: MaterialApp.router(routerConfig: router)),
+        ProviderScope(
+          overrides: [
+            playerProfileRepositoryProvider.overrideWithValue(
+              MemoryPlayerRepository(),
+            ),
+            allRecordsStreamProvider.overrideWith((ref) => Stream.value([])),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
@@ -763,6 +826,40 @@ void main() {
   // RESULTS SCREEN  — Screen 16
   // ================================================================
   group('Results Screen', () {
+    testWidgets('shows genuine calibrated round measurements', (tester) async {
+      final record = createTestSession().complete(
+        finalScore: 10,
+        finalLivesLost: 0,
+        timePlayed: 2,
+        finalBestCombo: 1,
+        finalCatches: 1,
+        finalAccuracy: 1,
+        finalSmileScore: 0,
+        calibratedSmileAttempted: true,
+        calibratedSmileSampleCount: 3,
+        averageCalibratedSmileIntensity: 42,
+        peakCalibratedSmileIntensity: 88,
+        calibratedSmileObservationSpanMs: 250,
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            playerProfileRepositoryProvider.overrideWithValue(
+              MemoryPlayerRepository(),
+            ),
+          ],
+          child: MaterialApp(home: ResultsScreen(gameRecord: record)),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Average Smile Intensity'), findsOneWidget);
+      expect(find.text('42%'), findsOneWidget);
+      expect(find.text('Peak Smile Intensity'), findsOneWidget);
+      expect(find.text('88%'), findsOneWidget);
+      expect(find.text('3'), findsWidgets);
+      expect(find.text('250 ms'), findsOneWidget);
+    });
+
     testWidgets('renders all key elements', (tester) async {
       await pumpApp(tester, '/results');
 
@@ -774,7 +871,7 @@ void main() {
       expect(find.text('Best Combo'), findsOneWidget);
       expect(find.text('Accuracy'), findsOneWidget);
       expect(find.text('Time'), findsOneWidget);
-      expect(find.text('Smile Score'), findsOneWidget);
+      expect(find.text('Smile Measurements'), findsOneWidget);
 
       // Actions.
       expect(find.text('PLAY AGAIN'), findsOneWidget);
@@ -895,17 +992,25 @@ void main() {
 
       expect(find.text('Smile Spotlight'), findsOneWidget);
       expect(find.text('Entertainment only — not scientific'), findsOneWidget);
-      expect(find.text('SPOTLIGHT ENERGY'), findsOneWidget);
-      expect(find.text('RADIANT'), findsOneWidget);
+      expect(find.text('SMILE INTENSITY'), findsOneWidget);
+      expect(find.text('Start the camera to measure a smile.'), findsOneWidget);
     });
 
     testWidgets('renders all three vibe breakdown rows', (tester) async {
       await pumpApp(tester, '/filmi-smile');
 
-      expect(find.text('Vibe Breakdown'), findsOneWidget);
-      expect(find.text('Smile Width'), findsOneWidget);
-      expect(find.text('Eye Sparkle'), findsOneWidget);
-      expect(find.text('Warmth'), findsOneWidget);
+      expect(find.text('Measurement details'), findsOneWidget);
+      expect(
+        find.text(
+          'Calibrated on-device smile intensity; not an emotion measurement.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Average Smile Intensity: unavailable'), findsOneWidget);
+      expect(
+        find.text('Processed on this device. No face images are saved.'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('renders the disclaimer text', (tester) async {
@@ -915,7 +1020,7 @@ void main() {
       expect(find.textContaining('not represent scientific'), findsOneWidget);
     });
 
-    testWidgets('score counts up to 92%', (tester) async {
+    testWidgets('missing measurements stay unavailable', (tester) async {
       await pumpApp(tester, '/filmi-smile');
 
       await tester.pump(const Duration(milliseconds: 1700));
@@ -923,7 +1028,7 @@ void main() {
 
       expect(
         find.byWidgetPredicate(
-          (w) => w is Text && w.data == '92%' && w.style?.fontSize == 48,
+          (w) => w is Text && w.data == '—' && w.style?.fontSize == 48,
         ),
         findsOneWidget,
       );
@@ -946,48 +1051,47 @@ void main() {
   // CHALLENGES  — Screen 19
   // ================================================================
   group('Challenges Screen', () {
-    testWidgets('renders header + subtitle', (tester) async {
+    testWidgets('renders verified daily header and streak', (tester) async {
       await pumpApp(tester, '/challenges');
 
-      expect(find.text('Challenges 🏆'), findsOneWidget);
-      expect(find.text('Complete goals to earn rewards'), findsOneWidget);
+      expect(find.text('Daily Challenges'), findsOneWidget);
+      expect(find.text("Today's challenges"), findsOneWidget);
+      expect(find.text('🔥 2'), findsOneWidget);
+      expect(find.text('Best 4'), findsOneWidget);
     });
 
-    testWidgets('renders featured challenge with progress and reward', (
+    testWidgets('renders genuine progress and cosmetic rewards', (
       tester,
     ) async {
       await pumpApp(tester, '/challenges');
 
-      expect(find.text('FEATURED TODAY'), findsOneWidget);
-      expect(find.text('Gol Gappa Tsunami'), findsOneWidget);
+      expect(find.text('Play a Round'), findsOneWidget);
+      expect(find.text('1 / 1 · Cosmetic badge 🎮'), findsOneWidget);
+      expect(find.text('Score 500'), findsOneWidget);
+      expect(find.text('320 / 500 · Cosmetic badge ⭐'), findsOneWidget);
+    });
+
+    testWidgets('renders unavailable smile state without fabricated value', (
+      tester,
+    ) async {
+      await pumpApp(tester, '/challenges');
+
+      expect(find.text('Peak Practice'), findsOneWidget);
+      expect(find.text('Unavailable'), findsOneWidget);
       expect(
-        find.text('Catch 100 gol gappas without 3 misses'),
+        find.text('Valid calibrated smile measurements are unavailable.'),
         findsOneWidget,
       );
-      expect(find.text('68 / 100'), findsOneWidget);
-      expect(find.text('6h left'), findsOneWidget);
-      expect(find.text('750 pts'), findsOneWidget);
     });
 
-    testWidgets('renders all three daily goals', (tester) async {
+    testWidgets('contains no fabricated leaderboard or reward points', (
+      tester,
+    ) async {
       await pumpApp(tester, '/challenges');
-
-      expect(find.text('Daily Goals'), findsOneWidget);
-      expect(find.text('Precision Player'), findsOneWidget);
-      expect(find.text('Combo King'), findsOneWidget);
-      expect(find.text('Smile Streak'), findsOneWidget);
-    });
-
-    testWidgets('renders leaderboard with three entries', (tester) async {
-      await pumpApp(tester, '/challenges');
-
-      expect(find.text('Leaderboard'), findsOneWidget);
-      expect(find.text('Priya S.'), findsOneWidget);
-      expect(find.text('Rahul K.'), findsOneWidget);
-      expect(find.text('Arjun (You)'), findsOneWidget);
-      expect(find.text('28,400'), findsOneWidget);
-      expect(find.text('24,900'), findsOneWidget);
-      expect(find.text('12,480'), findsOneWidget);
+      expect(find.text('Leaderboard'), findsNothing);
+      expect(find.text('Arjun (You)'), findsNothing);
+      expect(find.text('Priya S.'), findsNothing);
+      expect(find.textContaining(' pts'), findsNothing);
     });
 
     testWidgets('bottom nav: Challenges tab is active', (tester) async {
@@ -998,69 +1102,22 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Challenges 🏆'), findsOneWidget);
+      expect(find.text('Daily Challenges'), findsOneWidget);
     });
   });
 
   // ================================================================
-  // CHALLENGE DETAIL  — Screen 20
+  // LEGACY CHALLENGE DETAIL ROUTE
   // ================================================================
   group('Challenge Detail Screen', () {
-    testWidgets('renders title, challenge name, and description', (
+    testWidgets('redirects legacy demo route to verified daily challenges', (
       tester,
     ) async {
       await pumpApp(tester, '/challenge-detail');
 
-      expect(find.text('Challenge Detail'), findsOneWidget);
-      expect(find.text('Gol Gappa Tsunami'), findsOneWidget);
-      expect(find.textContaining('Catch 100 gol gappas'), findsOneWidget);
-    });
-
-    testWidgets('renders progress card with percent', (tester) async {
-      await pumpApp(tester, '/challenge-detail');
-
-      expect(find.text('Your Progress'), findsOneWidget);
-      expect(find.text('68%'), findsOneWidget);
-      expect(find.text('68 caught'), findsOneWidget);
-      expect(find.text('32 to go'), findsOneWidget);
-    });
-
-    testWidgets('renders completion reward with points and badge', (
-      tester,
-    ) async {
-      await pumpApp(tester, '/challenge-detail');
-
-      expect(find.text('Completion Reward'), findsOneWidget);
-      expect(find.text('750 pts'), findsOneWidget);
-      expect(find.text('+ Tsunami Badge unlock'), findsOneWidget);
-    });
-
-    testWidgets('renders time remaining and PLAY NOW', (tester) async {
-      await pumpApp(tester, '/challenge-detail');
-
-      expect(find.text('Time Remaining'), findsOneWidget);
-      expect(find.text('5h 22m'), findsOneWidget);
-      expect(find.text('PLAY NOW'), findsOneWidget);
-    });
-
-    testWidgets('PLAY NOW navigates to Countdown', (tester) async {
-      await pumpApp(tester, '/challenge-detail');
-      await tapAndAdvance(tester, find.text('PLAY NOW'));
-
-      expect(find.text('3'), findsOneWidget);
-      expect(find.text('GET READY...'), findsOneWidget);
-    });
-
-    testWidgets('back button navigates safely to Challenges when no parent', (
-      tester,
-    ) async {
-      await pumpApp(tester, '/challenge-detail');
-
-      await tester.tap(find.byIcon(Icons.chevron_left));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      expect(find.text('Challenges 🏆'), findsOneWidget);
+      expect(find.text('Daily Challenges'), findsOneWidget);
+      expect(find.text('Gol Gappa Tsunami'), findsNothing);
+      expect(find.text('750 pts'), findsNothing);
     });
   });
 
@@ -1155,18 +1212,18 @@ void main() {
 
       expect(find.text('PLAYER HUB'), findsOneWidget);
       expect(find.text('My Profile'), findsOneWidget);
-      expect(find.text('Arjun Khan'), findsOneWidget);
-      expect(find.text('Street Snacker · Level 12'), findsOneWidget);
-      expect(find.text('360 XP to level 13'), findsOneWidget);
+      expect(find.text('Happy Panda'), findsOneWidget);
+      expect(find.text('Local player'), findsOneWidget);
+      expect(find.text('Build your own game history'), findsOneWidget);
 
-      expect(find.text('12,480'), findsOneWidget);
-      expect(find.text('x8'), findsOneWidget);
-      expect(find.text('7 days'), findsOneWidget);
+      expect(find.text('0'), findsWidgets);
+      expect(find.text('x0'), findsOneWidget);
+      expect(find.text('Rounds'), findsOneWidget);
 
       expect(find.text('Make it yours'), findsOneWidget);
       expect(find.text('OPEN AVATAR STUDIO'), findsOneWidget);
       expect(find.text('Achievements'), findsOneWidget);
-      expect(find.text('14 of 30 unlocked'), findsOneWidget);
+      expect(find.text('Achievement tracking coming soon'), findsOneWidget);
     });
 
     testWidgets('matches the 337x700 reference geometry', (tester) async {
@@ -1243,8 +1300,9 @@ void main() {
       expect(find.text('Sound effects'), findsOneWidget);
       expect(find.text('Market music'), findsOneWidget);
       expect(find.text('Haptic feedback'), findsOneWidget);
-      expect(find.text('Master volume'), findsOneWidget);
-      expect(find.text('72%'), findsOneWidget);
+      expect(find.text('Master audio'), findsOneWidget);
+      expect(find.text('Music volume'), findsOneWidget);
+      expect(find.text('Effects volume'), findsOneWidget);
       expect(find.text('GAMEPLAY & PRIVACY'), findsOneWidget);
       expect(find.text('Game reminders'), findsOneWidget);
       expect(find.text('Camera & face tracking'), findsOneWidget);
@@ -1269,12 +1327,12 @@ void main() {
 
       expectRect('settings-panel', const Rect.fromLTWH(0, 0, 320, 680));
       expectRect('settings-header', const Rect.fromLTWH(18, 34, 288, 45));
-      expectRect('sound-settings-card', const Rect.fromLTWH(18, 114, 288, 231));
+      expectRect('sound-settings-card', const Rect.fromLTWH(18, 114, 288, 383));
       expectRect(
         'gameplay-settings-card',
-        const Rect.fromLTWH(18, 376, 288, 211),
+        const Rect.fromLTWH(18, 528, 288, 211),
       );
-      expectRect('camera-privacy-note', const Rect.fromLTWH(18, 599, 288, 18));
+      expectRect('camera-privacy-note', const Rect.fromLTWH(18, 751, 288, 18));
     });
   });
 
@@ -1405,7 +1463,7 @@ void main() {
   // ================================================================
   group('Domain — GameSessionRecord', () {
     test('create() yields a fresh ready session with stable id', () {
-      final r = GameSessionRecord.create();
+      final r = createTestSession();
       expect(r.id, greaterThan(0));
       expect(r.score, 0);
       expect(r.livesLost, 0);
@@ -1416,7 +1474,7 @@ void main() {
     });
 
     test('complete() returns a completed copy with round data', () {
-      final started = GameSessionRecord.create();
+      final started = createTestSession();
       final done = started.complete(
         finalScore: 500,
         finalLivesLost: 1,

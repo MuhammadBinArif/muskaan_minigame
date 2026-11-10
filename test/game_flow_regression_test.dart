@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'support/player_fixture.dart';
+import 'package:muskaan_minigame/features/profile/data/player_profile_repository.dart';
 import 'package:flame/game.dart';
 import 'package:muskaan_minigame/features/game/presentation/flame/muskaan_flame_game.dart';
 import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
@@ -26,6 +28,9 @@ void main() {
     addTearDown(avatars.close);
     final container = ProviderContainer(
       overrides: [
+        playerProfileRepositoryProvider.overrideWithValue(
+          MemoryPlayerRepository(),
+        ),
         profileAvatarProvider.overrideWith((ref) => avatars.stream),
         cameraServiceProvider.overrideWith((ref) => FakeCameraService()),
         visionServiceProvider.overrideWith((ref) => NullVisionService()),

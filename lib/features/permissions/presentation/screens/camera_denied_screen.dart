@@ -178,6 +178,10 @@ class _CameraDeniedScreenState extends State<CameraDeniedScreen>
                         _buildOpenSettingsButton(),
                         const SizedBox(height: 14),
                         _buildTryAgainButton(context),
+                        TextButton(
+                          onPressed: () => context.go('/game?touch=true'),
+                          child: const Text('Play Touch-Only'),
+                        ),
                         const SizedBox(height: 12),
                       ],
                     ),

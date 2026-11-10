@@ -23,6 +23,9 @@ class MuskaanFlameGame extends FlameGame {
     required this.onControlStatusChanged,
   }) : control = FaceGameControl(config: controlConfig);
 
+  bool touchOnly = false;
+  bool touchPressed = false;
+  double touchX = .5;
   final AvatarPresentation avatar = AvatarPresentation();
   final FaceGameControl control;
   final ControlFrameCallback onControlFrame;
@@ -58,6 +61,7 @@ class MuskaanFlameGame extends FlameGame {
   static const double targetY = 0.52;
 
   double get targetX {
+    if (touchOnly) return touchX;
     if (size.x <= 0) return control.currentX;
     final radius = math.min(58.0, size.x * 0.15);
     return control.worldX(worldWidth: size.x, targetRadius: radius) / size.x;
@@ -129,7 +133,11 @@ class MuskaanFlameGame extends FlameGame {
     control.update(dt);
     _reportStatus();
     if (_isPlaying) {
-      onControlFrame(_isMouthOpen, control.isActionable, targetX);
+      onControlFrame(
+        touchOnly ? touchPressed : _isMouthOpen,
+        touchOnly || control.isActionable,
+        targetX,
+      );
     }
   }
 
@@ -238,14 +246,16 @@ class MuskaanFlameGame extends FlameGame {
     if (size.x <= 0 || size.y <= 0) return;
     final radius = math.min(58.0, size.x * 0.15);
     final center = Offset(
-      control.worldX(worldWidth: size.x, targetRadius: radius),
+      touchOnly
+          ? touchX * size.x
+          : control.worldX(worldWidth: size.x, targetRadius: radius),
       targetY * size.y,
     );
-    final active = control.isActionable;
+    final active = touchOnly || control.isActionable;
     final ringColor =
         !active
             ? const Color(0xFF817995)
-            : _isMouthOpen
+            : (touchOnly ? touchPressed : _isMouthOpen)
             ? const Color(0xFF3DD68C)
             : const Color(0xFFFF7A1A);
     canvas.drawCircle(

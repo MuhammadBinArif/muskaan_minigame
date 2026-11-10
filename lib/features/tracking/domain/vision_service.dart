@@ -33,6 +33,21 @@ class VisionFrame {
   bool get faceDetected => observation.faceDetected;
   int get faceCount => observation.faceCount;
   DateTime get capturedAt => observation.capturedAt;
+
+  /// Associates detector output with the camera callback that produced it.
+  /// This keeps freshness and ordering based on frame arrival, not ML latency.
+  VisionFrame capturedAtTime(DateTime value) => VisionFrame(
+    observation: FaceTrackingObservation(
+      smileProbability: observation.smileProbability,
+      faceDetected: observation.faceDetected,
+      faceCount: observation.faceCount,
+      facePosition: observation.facePosition,
+      faceSize: observation.faceSize,
+      mouthPosition: observation.mouthPosition,
+      mouthOpenness: observation.mouthOpenness,
+      capturedAt: value,
+    ),
+  );
 }
 
 /// ML-Kit-agnostic face/mouth detection boundary.

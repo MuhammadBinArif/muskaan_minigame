@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import '../../../profile/presentation/widgets/player_identity.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:muskaan_minigame/shared/widgets/food_illustrations.dart';
@@ -91,7 +92,7 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
     _Feature(
       emoji: '😁',
       title: 'Smile Score',
-      desc: 'Get rated on your biggest smile',
+      desc: 'See your on-device smile probability',
     ),
   ];
 
@@ -148,6 +149,7 @@ class _HomeFirstTimeScreenState extends State<HomeFirstTimeScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const PlayerIdentity(),
                       // ---- Header ----
                       const Text('Welcome to', style: AppTypography.title),
                       const SizedBox(height: 2),

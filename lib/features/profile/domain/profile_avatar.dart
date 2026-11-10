@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../data/player_profile_repository.dart';
 
-/// The existing profile uses a static emoji, not an image or editable parts.
-/// A future persisted profile adapter must emit changes through this boundary.
+/// Presentation boundary for the authoritative profile’s persisted emoji.
 class ProfileAvatar {
   const ProfileAvatar(this.symbol);
   final String symbol;
@@ -22,16 +22,12 @@ abstract interface class ProfileAvatarRepository {
   Stream<ProfileAvatar?> watchAvatar();
 }
 
-/// No avatar selection or persistence exists yet. Do not manufacture a saved
-/// selection or add a second database. Replace this adapter when it exists.
-class UnconfiguredProfileAvatarRepository implements ProfileAvatarRepository {
-  const UnconfiguredProfileAvatarRepository();
-  @override
-  Stream<ProfileAvatar?> watchAvatar() => Stream.value(null);
-}
-
 final profileAvatarRepositoryProvider = Provider<ProfileAvatarRepository>(
-  (ref) => const UnconfiguredProfileAvatarRepository(),
+  (ref) => _PlayerAvatarRepository(
+    ref.watch(
+      playerProfileProvider.select((state) => state.asData?.value.avatar),
+    ),
+  ),
 );
 final profileAvatarProvider = StreamProvider<ProfileAvatar?>(
   (ref) => ref.watch(profileAvatarRepositoryProvider).watchAvatar(),
@@ -39,3 +35,13 @@ final profileAvatarProvider = StreamProvider<ProfileAvatar?>(
 
 ProfileAvatar resolveAvatarState(AsyncValue<ProfileAvatar?> state) =>
     ProfileAvatar.resolve(state.asData?.value);
+
+class _PlayerAvatarRepository implements ProfileAvatarRepository {
+  _PlayerAvatarRepository(this.symbol);
+  final String? symbol;
+  @override
+  Stream<ProfileAvatar?> watchAvatar() {
+    // Provider dependency invalidation recreates this stream after a profile edit.
+    return Stream.value(symbol == null ? null : ProfileAvatar(symbol!));
+  }
+}

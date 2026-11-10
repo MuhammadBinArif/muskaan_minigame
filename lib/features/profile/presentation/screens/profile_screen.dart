@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import '../../data/player_profile_repository.dart';
+import '../../../game/data/records_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:muskaan_minigame/features/ads/ad_service.dart';
 import 'package:muskaan_minigame/shared/widgets/app_bottom_nav.dart';
+import 'package:muskaan_minigame/features/progression/application/progression_service.dart';
+import 'package:muskaan_minigame/features/progression/domain/player_progression.dart';
 
 class _ProfileColors {
   static const page = Color(0xFF100C14);
@@ -36,6 +40,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   static const List<String> _avatarOptions = <String>[
+    '🥷',
     '🧑🏽‍🦱',
     '👨🏾',
     '👩🏽',
@@ -44,13 +49,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   late final TextEditingController _nameController;
   bool _editingName = false;
-  int _selectedAvatar = 0;
+  int get _selectedAvatar => _avatarOptions.indexOf(
+    ref.watch(playerProfileProvider).asData?.value.avatar ?? '',
+  );
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(
-      text: widget.isNewUser ? 'PlayerName' : 'Arjun Khan',
+      text: ref.read(playerProfileProvider).asData?.value.displayName ?? '',
     );
   }
 
@@ -60,12 +67,144 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     super.dispose();
   }
 
-  void _toggleNameEditing() {
-    setState(() => _editingName = !_editingName);
+  Future<void> _toggleNameEditing() async {
+    if (!_editingName) {
+      _nameController.text =
+          ref.read(playerProfileProvider).requireValue.displayName;
+      setState(() => _editingName = true);
+      return;
+    }
+    try {
+      await ref
+          .read(playerProfileProvider.notifier)
+          .update(name: _nameController.text);
+      if (mounted) setState(() => _editingName = false);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is FormatException
+                  ? error.message
+                  : 'Unable to save name. Please try again.',
+            ),
+          ),
+        );
+    }
+  }
+
+  Future<void> _selectAvatar(int index) async {
+    await _saveAvatar(_avatarOptions[index]);
+  }
+
+  Future<void> _saveAvatar(String symbol) async {
+    try {
+      await ref.read(playerProfileProvider.notifier).update(avatar: symbol);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to save avatar. Please try again.'),
+          ),
+        );
+    }
+  }
+
+  Future<void> _openAvatarStudio() async {
+    final profile = ref.read(playerProfileProvider).requireValue;
+    PlayerProgression progression;
+    try {
+      progression = await ref
+          .read(progressionServiceProvider)
+          .synchronize(profile.id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Avatar options could not be loaded. Please try again.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder:
+          (context) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Avatar Studio',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                  ),
+                  const SizedBox(height: 16),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          for (final cosmetic in progression.cosmetics)
+                            _CosmeticChoice(
+                              cosmetic: cosmetic,
+                              selected: profile.avatar == cosmetic.item.symbol,
+                              onTap:
+                                  cosmetic.unlocked
+                                      ? () async {
+                                        if (!await ref
+                                            .read(progressionServiceProvider)
+                                            .canEquip(
+                                              profile.id,
+                                              cosmetic.item.symbol,
+                                            )) {
+                                          return;
+                                        }
+                                        await _saveAvatar(cosmetic.item.symbol);
+                                        if (context.mounted) {
+                                          Navigator.pop(context);
+                                        }
+                                      }
+                                      : null,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      await _saveAvatar(_avatarOptions.first);
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                    child: const Text('Reset avatar'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final profile = ref.watch(playerProfileProvider);
+    if (!profile.hasValue)
+      return Scaffold(
+        body: Center(
+          child:
+              profile.isLoading
+                  ? const CircularProgressIndicator()
+                  : const Text(
+                    'Your profile could not be read. Saved data has been preserved. Restart to retry.',
+                  ),
+        ),
+      );
     return Scaffold(
       backgroundColor: _ProfileColors.page,
       body: SafeArea(
@@ -106,6 +245,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 _buildAvatarCard(),
                                 const SizedBox(height: 12),
                                 _buildAchievementCard(),
+                                const SizedBox(height: 12),
+                                _buildPlayerProgressCard(),
+                                const SizedBox(height: 12),
+                                _buildDailyChallengesCard(),
+                                const SizedBox(height: 12),
+                                _buildSmileAnalyticsCard(),
                                 if (ref
                                     .read(adServiceProvider)
                                     .privacyOptionsRequired) ...[
@@ -216,7 +361,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       child: Row(
         children: [
           _AvatarPortrait(
-            symbol: _avatarOptions[_selectedAvatar],
+            symbol:
+                ref.watch(playerProfileProvider).asData?.value.avatar ?? '🥷',
             size: 64,
             selected: true,
           ),
@@ -229,7 +375,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _buildNameRow(),
                 const SizedBox(height: 5),
                 const Text(
-                  'Street Snacker · Level 12',
+                  'Local player',
                   style: TextStyle(
                     color: _ProfileColors.body,
                     fontSize: 10,
@@ -241,7 +387,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 const _XpProgress(),
                 const SizedBox(height: 5),
                 const Text(
-                  '360 XP to level 13',
+                  'Build your own game history',
                   style: TextStyle(
                     color: _ProfileColors.muted,
                     fontSize: 8,
@@ -284,7 +430,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                   )
                   : Text(
-                    _nameController.text,
+                    ref
+                            .watch(playerProfileProvider)
+                            .asData
+                            ?.value
+                            .displayName ??
+                        'Player unavailable',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -318,18 +469,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildStats() {
-    final values =
-        widget.isNewUser
-            ? const <(String, String)>[
-              ('—', 'Best score'),
-              ('—', 'Best combo'),
-              ('—', 'Hot streak'),
-            ]
-            : const <(String, String)>[
-              ('12,480', 'Best score'),
-              ('x8', 'Best combo'),
-              ('7 days', 'Hot streak'),
-            ];
+    final profile = ref.watch(playerProfileProvider).asData?.value;
+    final records =
+        (ref.watch(allRecordsStreamProvider).asData?.value ?? [])
+            .where((r) => profile != null && r.playerId == profile.id)
+            .toList();
+    final best = records.fold<int>(
+      0,
+      (best, r) => r.score > best ? r.score : best,
+    );
+    final combo = records.fold<int>(
+      0,
+      (best, r) => r.bestCombo > best ? r.bestCombo : best,
+    );
+    final values = <(String, String)>[
+      ('$best', 'Best score'),
+      ('x$combo', 'Best combo'),
+      ('${records.length}', 'Rounds'),
+    ];
 
     return SizedBox(
       key: const Key('profile-stats'),
@@ -428,7 +585,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   if (i > 0) const SizedBox(width: 7),
                   Expanded(
                     child: GestureDetector(
-                      onTap: () => setState(() => _selectedAvatar = i),
+                      onTap: () => _selectAvatar(i),
                       child: _AvatarPortrait(
                         symbol: _avatarOptions[i],
                         size: 61,
@@ -445,32 +602,35 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             child: Semantics(
               button: true,
               label: 'Open avatar studio',
-              child: Container(
-                key: const Key('open-avatar-studio'),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _ProfileColors.orange),
-                ),
-                alignment: Alignment.center,
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.edit_outlined,
-                      color: _ProfileColors.orange,
-                      size: 17,
-                    ),
-                    SizedBox(width: 9),
-                    Text(
-                      'OPEN AVATAR STUDIO',
-                      style: TextStyle(
+              child: InkWell(
+                onTap: _openAvatarStudio,
+                child: Container(
+                  key: const Key('open-avatar-studio'),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _ProfileColors.orange),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.edit_outlined,
                         color: _ProfileColors.orange,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: .25,
+                        size: 17,
                       ),
-                    ),
-                  ],
+                      SizedBox(width: 9),
+                      Text(
+                        'OPEN AVATAR STUDIO',
+                        style: TextStyle(
+                          color: _ProfileColors.orange,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: .25,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -480,65 +640,119 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
-  Widget _buildAchievementCard() {
-    return Container(
-      key: const Key('profile-achievement-card'),
-      height: 57,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
+  Widget _buildSmileAnalyticsCard() {
+    return Semantics(
+      button: true,
+      label: 'Open Smile Analytics',
+      child: Material(
         color: _ProfileColors.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: _ProfileColors.gold.withValues(alpha: .10),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.star_border_rounded,
-              size: 18,
-              color: _ProfileColors.gold,
-            ),
-          ),
-          const SizedBox(width: 11),
-          const Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
+        borderRadius: BorderRadius.circular(13),
+        child: InkWell(
+          key: const Key('open-smile-analytics'),
+          onTap: () => context.push('/smile-analytics'),
+          borderRadius: BorderRadius.circular(13),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Row(
               children: [
-                Text(
-                  'Achievements',
-                  style: TextStyle(
-                    color: _ProfileColors.cream,
-                    fontSize: 11,
-                    height: 1,
-                    fontWeight: FontWeight.w700,
+                Icon(Icons.insights_rounded, color: _ProfileColors.gold),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Smile Analytics',
+                        style: TextStyle(
+                          color: _ProfileColors.cream,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Explore your private measured-round history',
+                        style: TextStyle(
+                          color: _ProfileColors.muted,
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                SizedBox(height: 6),
-                Text(
-                  '14 of 30 unlocked',
-                  style: TextStyle(
-                    color: _ProfileColors.muted,
-                    fontSize: 8,
-                    height: 1,
-                    fontWeight: FontWeight.w500,
+                Icon(Icons.chevron_right, color: _ProfileColors.muted),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAchievementCard() {
+    return Material(
+      key: const Key('profile-achievement-card'),
+      color: _ProfileColors.card,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () => context.push('/achievements'),
+        borderRadius: BorderRadius.circular(12),
+        child: const SizedBox(
+          height: 57,
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Color(0x1AFFD83D),
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
                   ),
+                  child: Icon(
+                    Icons.star_border_rounded,
+                    size: 18,
+                    color: _ProfileColors.gold,
+                  ),
+                ),
+                SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Achievements',
+                        style: TextStyle(
+                          color: _ProfileColors.cream,
+                          fontSize: 11,
+                          height: 1,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'View verified badges and progress',
+                        style: TextStyle(
+                          color: _ProfileColors.muted,
+                          fontSize: 8,
+                          height: 1,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: _ProfileColors.muted,
                 ),
               ],
             ),
           ),
-          const Icon(
-            Icons.chevron_right_rounded,
-            size: 18,
-            color: _ProfileColors.muted,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -560,6 +774,84 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       child: const Text('Advertising privacy choices'),
     );
   }
+
+  Widget _buildDailyChallengesCard() => Material(
+    color: _ProfileColors.card,
+    borderRadius: BorderRadius.circular(12),
+    child: InkWell(
+      key: const Key('open-daily-challenges'),
+      onTap: () => context.push('/challenges'),
+      borderRadius: BorderRadius.circular(12),
+      child: const Padding(
+        padding: EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Text('🔥', style: TextStyle(fontSize: 23)),
+            SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Daily Challenges',
+                    style: TextStyle(
+                      color: _ProfileColors.cream,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Build your verified activity streak',
+                    style: TextStyle(color: _ProfileColors.muted, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: _ProfileColors.muted),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildPlayerProgressCard() => Material(
+    color: _ProfileColors.card,
+    borderRadius: BorderRadius.circular(12),
+    child: InkWell(
+      key: const Key('open-player-progress'),
+      onTap: () => context.push('/player-progress'),
+      borderRadius: BorderRadius.circular(12),
+      child: const Padding(
+        padding: EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome, color: _ProfileColors.gold),
+            SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Player Progress',
+                    style: TextStyle(
+                      color: _ProfileColors.cream,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Levels, XP and cosmetic unlocks',
+                    style: TextStyle(color: _ProfileColors.muted, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: _ProfileColors.muted),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _AvatarPortrait extends StatelessWidget {
@@ -604,6 +896,80 @@ class _AvatarPortrait extends StatelessWidget {
   }
 }
 
+class _CosmeticChoice extends StatelessWidget {
+  const _CosmeticChoice({
+    required this.cosmetic,
+    required this.selected,
+    required this.onTap,
+  });
+  final CosmeticProgress cosmetic;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: cosmetic.unlocked,
+    label:
+        '${cosmetic.item.name}, ${cosmetic.unlocked ? 'unlocked' : 'locked'}, ${ProgressionService.rules.requirement(cosmetic)}, ${ProgressionService.rules.progress(cosmetic)}',
+    child: Tooltip(
+      message: 'Choose avatar ${cosmeticCatalog.indexOf(cosmetic.item) + 1}',
+      child: SizedBox(
+        width: 105,
+        child: Material(
+          color: selected ? const Color(0x33FFD83D) : const Color(0x11000000),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Stack(
+                    children: [
+                      Text(
+                        cosmetic.item.symbol,
+                        style: TextStyle(
+                          fontSize: 34,
+                          color: cosmetic.unlocked ? null : Colors.grey,
+                        ),
+                      ),
+                      if (!cosmetic.unlocked)
+                        const Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Icon(Icons.lock, size: 16),
+                        ),
+                    ],
+                  ),
+                  Text(
+                    cosmetic.item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  Text(
+                    cosmetic.unlocked
+                        ? cosmetic.item.isDefault
+                            ? 'Default'
+                            : 'Unlocked'
+                        : '${ProgressionService.rules.requirement(cosmetic)}\n${ProgressionService.rules.progress(cosmetic)}',
+                    maxLines: 3,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _XpProgress extends StatelessWidget {
   const _XpProgress();
 
@@ -619,7 +985,7 @@ class _XpProgress extends StatelessWidget {
             const ColoredBox(color: _ProfileColors.track),
             FractionallySizedBox(
               alignment: Alignment.centerLeft,
-              widthFactor: .72,
+              widthFactor: 0,
               child: const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(

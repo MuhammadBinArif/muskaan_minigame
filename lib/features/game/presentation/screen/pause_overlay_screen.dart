@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:muskaan_minigame/features/audio/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -79,17 +81,17 @@ class AppTypography {
 // ==========================================
 // PAUSE OVERLAY SCREEN
 // ==========================================
-class PauseOverlayScreen extends StatefulWidget {
+class PauseOverlayScreen extends ConsumerStatefulWidget {
   /// The score to display. Passed in by the gameplay layer.
   final String score;
 
   const PauseOverlayScreen({super.key, this.score = '8,420'});
 
   @override
-  State<PauseOverlayScreen> createState() => _PauseOverlayScreenState();
+  ConsumerState<PauseOverlayScreen> createState() => _PauseOverlayScreenState();
 }
 
-class _PauseOverlayScreenState extends State<PauseOverlayScreen>
+class _PauseOverlayScreenState extends ConsumerState<PauseOverlayScreen>
     with TickerProviderStateMixin {
   /// One-shot entry: fade + scale in.
   late final AnimationController _entry;
@@ -100,8 +102,8 @@ class _PauseOverlayScreenState extends State<PauseOverlayScreen>
   late final AnimationController _glow;
 
   /// Toggle states — hoisted here so they persist across rebuilds.
-  bool _soundOn = true;
-  bool _musicOn = true;
+  bool get _soundOn => ref.watch(audioServiceProvider).effectsEnabled;
+  bool get _musicOn => ref.watch(audioServiceProvider).musicEnabled;
 
   @override
   void initState() {
@@ -229,7 +231,15 @@ class _PauseOverlayScreenState extends State<PauseOverlayScreen>
                     icon: '🔊',
                     label: 'Sound',
                     isOn: _soundOn,
-                    onTap: () => setState(() => _soundOn = !_soundOn),
+                    onTap:
+                        () => ref
+                            .read(audioServiceProvider)
+                            .configure(
+                              effects:
+                                  !ref
+                                      .read(audioServiceProvider)
+                                      .effectsEnabled,
+                            ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -238,7 +248,13 @@ class _PauseOverlayScreenState extends State<PauseOverlayScreen>
                     icon: '🎵',
                     label: 'Music',
                     isOn: _musicOn,
-                    onTap: () => setState(() => _musicOn = !_musicOn),
+                    onTap:
+                        () => ref
+                            .read(audioServiceProvider)
+                            .configure(
+                              music:
+                                  !ref.read(audioServiceProvider).musicEnabled,
+                            ),
                   ),
                 ),
               ],

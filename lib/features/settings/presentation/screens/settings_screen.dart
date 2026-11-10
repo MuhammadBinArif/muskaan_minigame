@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../audio/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -17,19 +19,16 @@ class _SettingsColors {
   static const sliderTrack = Color(0xFF17162C);
 }
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
-  bool _soundEffects = true;
-  bool _marketMusic = true;
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _hapticFeedback = true;
   bool _gameReminders = false;
-  double _volume = .72;
 
   void _goBack() {
     if (context.canPop()) {
@@ -147,15 +146,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildSoundCard() {
+    final audio = ref.watch(audioServiceProvider);
     return Container(
       key: const Key('sound-settings-card'),
-      height: 231,
+      height: 383,
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         color: _SettingsColors.card,
-        borderRadius: BorderRadius.circular(15),
-      ),
-      foregroundDecoration: BoxDecoration(
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: const Color(0xFF33314F)),
       ),
@@ -163,18 +160,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           _ToggleRow(
             icon: Icons.volume_up_outlined,
-            title: 'Sound effects',
-            subtitle: 'Catches, combos and hazards',
-            value: _soundEffects,
-            onChanged: (value) => setState(() => _soundEffects = value),
+            title: 'Master audio',
+            subtitle: 'Override music and effects',
+            value: audio.enabled,
+            onChanged: (v) => audio.configure(master: v),
           ),
           const _InsetDivider(),
           _ToggleRow(
             icon: Icons.music_note_rounded,
             title: 'Market music',
             subtitle: 'Background soundtrack',
-            value: _marketMusic,
-            onChanged: (value) => setState(() => _marketMusic = value),
+            value: audio.musicEnabled,
+            onChanged: (v) => audio.configure(music: v),
+          ),
+          const _InsetDivider(),
+          _ToggleRow(
+            icon: Icons.graphic_eq_rounded,
+            title: 'Sound effects',
+            subtitle: 'Catches, combos and hazards',
+            value: audio.effectsEnabled,
+            onChanged: (v) => audio.configure(effects: v),
           ),
           const _InsetDivider(),
           _ToggleRow(
@@ -184,41 +189,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: _hapticFeedback,
             onChanged: (value) => setState(() => _hapticFeedback = value),
           ),
-          const _InsetDivider(),
-          SizedBox(
-            height: 72,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Master volume',
-                        style: TextStyle(
-                          color: _SettingsColors.body,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '${(_volume * 100).round()}%',
-                      style: const TextStyle(
-                        color: _SettingsColors.gold,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 11),
-                _VolumeSlider(
-                  value: _volume,
-                  onChanged: (value) => setState(() => _volume = value),
-                ),
-              ],
-            ),
+          _AudioVolumeRow(
+            label: 'Music volume',
+            value: audio.musicVolume,
+            onChanged: (v) => audio.configure(musicLevel: v),
+          ),
+          _AudioVolumeRow(
+            label: 'Effects volume',
+            value: audio.effectsVolume,
+            onChanged: (v) => audio.configure(effectsLevel: v),
           ),
         ],
       ),
@@ -496,10 +475,15 @@ class _CompactSwitch extends StatelessWidget {
 }
 
 class _VolumeSlider extends StatelessWidget {
-  const _VolumeSlider({required this.value, required this.onChanged});
+  const _VolumeSlider({
+    required this.value,
+    required this.onChanged,
+    required this.sliderKey,
+  });
 
   final double value;
   final ValueChanged<double> onChanged;
+  final Key sliderKey;
 
   @override
   Widget build(BuildContext context) {
@@ -513,7 +497,7 @@ class _VolumeSlider extends StatelessWidget {
           slider: true,
           value: '${(value * 100).round()} percent',
           child: GestureDetector(
-            key: const Key('master-volume-slider'),
+            key: sliderKey,
             behavior: HitTestBehavior.opaque,
             onTapDown: (details) => update(details.localPosition.dx),
             onHorizontalDragUpdate:
@@ -573,6 +557,47 @@ class _VolumeSlider extends StatelessWidget {
       },
     );
   }
+}
+
+class _AudioVolumeRow extends StatelessWidget {
+  const _AudioVolumeRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+  final String label;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 86,
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: _SettingsColors.body),
+              ),
+            ),
+            Text(
+              '${(value * 100).round()}%',
+              style: const TextStyle(color: _SettingsColors.gold),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _VolumeSlider(
+          sliderKey: Key('${label.toLowerCase().replaceAll(' ', '-')}-slider'),
+          value: value,
+          onChanged: onChanged,
+        ),
+      ],
+    ),
+  );
 }
 
 class _PrivacyNote extends StatelessWidget {

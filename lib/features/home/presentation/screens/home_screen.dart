@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import '../../../profile/presentation/widgets/player_identity.dart';
+import '../../../profile/data/player_profile_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -197,6 +199,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                 child: Column(
                   children: [
+                    TextButton(
+                      onPressed: () => context.go('/game?touch=true'),
+                      child: const Text('Play Touch-Only'),
+                    ),
                     _buildHeroCard(),
                     const SizedBox(height: 12),
                     _buildModeTiles(),
@@ -240,13 +246,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Greeting
-              const Column(
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Good evening,', style: AppTypography.greeting),
-                  SizedBox(height: 2),
-                  Text('Arjun 👋', style: AppTypography.userName),
+                  const Text('Good evening,', style: AppTypography.greeting),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    width: 210,
+                    child: PlayerIdentity(style: AppTypography.userName),
+                  ),
                 ],
               ),
 
@@ -269,7 +278,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     children: const [
                       Text('🔥', style: TextStyle(fontSize: 13)),
                       SizedBox(width: 4),
-                      Text('7 streak', style: AppTypography.badgeNumber),
+                      Text('Local player', style: AppTypography.badgeNumber),
                     ],
                   ),
                 ),
@@ -593,14 +602,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // STATS
   // ---------------------------------------------------------------------------
   Widget _buildStats() {
-    final bestAsync = ref.watch(bestRecordStreamProvider);
-    final bestRecord = bestAsync.valueOrNull;
+    final player = ref.watch(playerProfileProvider).asData?.value;
+    final records = (ref.watch(allRecordsStreamProvider).asData?.value ?? [])
+        .where((r) => player != null && r.playerId == player.id);
+    final bestRecord =
+        records.isEmpty
+            ? null
+            : records.reduce((a, b) => a.score >= b.score ? a : b);
 
-    final scoreStr =
-        bestRecord != null ? _formatScore(bestRecord.score) : '12,480';
-    final comboStr = bestRecord != null ? 'x${bestRecord.bestCombo}' : 'x8';
+    final scoreStr = bestRecord != null ? _formatScore(bestRecord.score) : '—';
+    final comboStr = bestRecord != null ? 'x${bestRecord.bestCombo}' : '—';
     final accuracyStr =
-        bestRecord != null ? '${(bestRecord.accuracy * 100).toInt()}%' : '74%';
+        bestRecord != null ? '${(bestRecord.accuracy * 100).toInt()}%' : '—';
 
     return Row(
       children: [
