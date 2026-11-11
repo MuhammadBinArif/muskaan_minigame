@@ -21,6 +21,7 @@ void main() {
       overrides: [gameDatabaseProvider.overrideWithValue(database)],
     );
     await container.read(playerProfileProvider.notifier).ready;
+    await container.read(playerProfileProvider.notifier).update(onboarded: true);
     final router = createRouter(
       initialLocation: pushFromHome ? '/home' : '/game?touch=true',
     );

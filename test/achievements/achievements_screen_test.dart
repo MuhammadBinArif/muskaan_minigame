@@ -99,7 +99,8 @@ void main() {
     expect(find.byKey(const Key('achievement-unlock-dialog')), findsOneWidget);
     expect(find.text('Achievement unlocked!'), findsOneWidget);
     await tester.tap(find.text('Continue'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.byKey(const Key('achievement-unlock-dialog')), findsNothing);
     expect(container.read(latestAchievementUnlocksProvider), isEmpty);
   });

@@ -397,7 +397,7 @@ void main() {
 
     testWidgets('Streak badge → Challenges', (tester) async {
       await pumpApp(tester, '/home');
-      await tapAndAdvance(tester, find.text('7 streak'));
+      await tapAndAdvance(tester, find.text('Local player'));
 
       expect(find.text('Daily Challenges'), findsOneWidget);
     });
