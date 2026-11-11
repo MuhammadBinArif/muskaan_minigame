@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:muskaan_minigame/features/tracking/domain/calibration_config.dart';
 import 'package:flutter/material.dart';
+import 'package:drift/native.dart';
 import 'support/player_fixture.dart';
 import 'package:muskaan_minigame/features/profile/data/player_profile_repository.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +12,7 @@ import 'package:camera/camera.dart';
 import 'package:muskaan_minigame/app/router/app_router.dart';
 import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/features/game/data/records_repository.dart';
+import 'package:muskaan_minigame/features/game/data/game_database.dart';
 import 'package:muskaan_minigame/features/challenges/application/daily_challenge_service.dart';
 import 'package:muskaan_minigame/features/challenges/domain/daily_challenge.dart';
 import 'package:muskaan_minigame/features/face_detection/domain/face_detection_provider.dart';
@@ -81,10 +83,17 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final database = GameDatabase.forTesting(NativeDatabase.memory());
     final router = createRouter(initialLocation: initialLocation);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      await database.close();
+    });
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          gameDatabaseProvider.overrideWithValue(database),
           playerProfileRepositoryProvider.overrideWithValue(
             MemoryPlayerRepository(),
           ),
