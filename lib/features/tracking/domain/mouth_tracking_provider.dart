@@ -163,8 +163,9 @@ class MouthTrackingController extends StateNotifier<MouthTrackingState> {
        super(MouthTrackingState.initial(config)) {
     _cameraSub = _camera.stateStream.listen((camState) {
       if (mounted) {
-        if (camState.status != CameraStatus.streaming)
+        if (camState.status != CameraStatus.streaming) {
           _smileEngine.invalidate();
+        }
         state = state.copyWith(
           clearSmile: camState.status != CameraStatus.streaming,
           cameraStatus: camState.status,

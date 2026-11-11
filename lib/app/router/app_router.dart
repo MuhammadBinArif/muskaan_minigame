@@ -257,8 +257,8 @@ class _ResultsRouteBridge extends ConsumerWidget {
     final pending = session.completedRecord;
     if ((session.isSaving || session.saveError != null) &&
         pending?.id == id &&
-        _isOwnedCompletion(pending!, activePlayer.id)) {
-      return _resultWithSaveStatus(ref, session, pending!);
+        _isOwnedCompletion(pending, activePlayer.id)) {
+      return _resultWithSaveStatus(ref, session, pending);
     }
 
     final persisted = ref.watch(resultByIdProvider(id));

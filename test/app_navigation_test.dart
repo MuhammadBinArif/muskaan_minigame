@@ -18,6 +18,7 @@ import 'package:muskaan_minigame/features/face_detection/domain/face_detection_r
 import 'package:muskaan_minigame/features/face_detection/domain/face_detection_service.dart';
 import 'package:muskaan_minigame/features/camera/domain/camera_provider.dart';
 import 'package:muskaan_minigame/features/game/presentation/screen/game_over_screen.dart';
+import 'package:muskaan_minigame/features/results/presentation/screens/results_screen.dart';
 import 'package:muskaan_minigame/features/home/presentation/screens/home_screen.dart';
 import 'package:muskaan_minigame/features/tracking/domain/mouth_tracking_provider.dart';
 import 'package:muskaan_minigame/features/tracking/domain/vision_service.dart';

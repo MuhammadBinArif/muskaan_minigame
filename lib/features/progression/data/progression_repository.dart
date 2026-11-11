@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../game/data/game_database.dart';
+import '../../game/data/records_repository.dart' show gameDatabaseProvider;
 import '../domain/player_progression.dart';
 
 class ProgressionRepository {
@@ -10,8 +11,9 @@ class ProgressionRepository {
 
   Future<void> awardResult(ProgressionAward award) async {
     _validatePlayerId(award.playerId);
-    if (award.resultId <= 0 || award.xp < 100 || award.xp > 200)
+    if (award.resultId <= 0 || award.xp < 100 || award.xp > 200) {
       throw const FormatException('Invalid progression award.');
+    }
     await database.customStatement(
       'INSERT OR IGNORE INTO player_progression_awards(player_id, result_id, xp, awarded_at) VALUES(?, ?, ?, ?)',
       [
@@ -85,8 +87,9 @@ class ProgressionRepository {
   }
 
   void _validatePlayerId(String playerId) {
-    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(playerId))
+    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(playerId)) {
       throw const FormatException('A valid stable player ID is required.');
+    }
   }
 }
 

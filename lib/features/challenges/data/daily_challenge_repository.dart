@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../game/data/game_database.dart';
+import '../../game/data/records_repository.dart' show gameDatabaseProvider;
 import '../domain/daily_challenge.dart';
 
 class DailyChallengeRepository {
@@ -94,8 +95,9 @@ class DailyChallengeRepository {
   }
 
   void _validatePlayerId(String playerId) {
-    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(playerId))
+    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(playerId)) {
       throw const FormatException('A valid stable player ID is required.');
+    }
   }
 }
 

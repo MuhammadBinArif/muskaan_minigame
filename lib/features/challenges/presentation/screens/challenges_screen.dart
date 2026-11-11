@@ -73,7 +73,8 @@ class ChallengesScreen extends ConsumerWidget {
           data:
               (state) => RefreshIndicator(
                 onRefresh: () async {
-                  await ref.refresh(dailyEngagementProvider(profile.id).future);
+                  ref.invalidate(dailyEngagementProvider(profile.id));
+                  await ref.read(dailyEngagementProvider(profile.id).future);
                 },
                 child: ListView(
                   key: ValueKey(

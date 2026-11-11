@@ -10,7 +10,6 @@ import 'package:muskaan_minigame/features/game/data/records_repository.dart';
 import 'package:muskaan_minigame/features/profile/data/player_profile_repository.dart';
 import 'package:muskaan_minigame/features/profile/domain/player_profile.dart';
 import 'package:muskaan_minigame/features/profile/domain/profile_avatar.dart';
-import 'package:muskaan_minigame/core/domain/game_session.dart';
 import 'package:muskaan_minigame/core/providers/game_session_provider.dart';
 import 'package:muskaan_minigame/features/smile/domain/smile_measurement.dart';
 import '../support/player_fixture.dart';

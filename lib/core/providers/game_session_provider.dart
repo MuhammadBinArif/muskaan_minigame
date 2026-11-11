@@ -191,8 +191,9 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
     if (!state.isPlaying ||
         measurement == null ||
         (_lastSmileAt != null &&
-            !measurement.capturedAt.isAfter(_lastSmileAt!)))
+            !measurement.capturedAt.isAfter(_lastSmileAt!))) {
       return;
+    }
     _calibratedSmileAttempted = true;
     _calibratedSmileCollector?.add(measurement, now: DateTime.now());
     final p = measurement.rawProbability;
@@ -201,8 +202,9 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
         p < 0 ||
         p > 1 ||
         age.isNegative ||
-        age > const Duration(milliseconds: 500))
+        age > const Duration(milliseconds: 500)) {
       return;
+    }
     _lastSmileAt = measurement.capturedAt;
     _smileCount++;
     _smileSum += p;

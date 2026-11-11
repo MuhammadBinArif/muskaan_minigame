@@ -98,11 +98,21 @@ class GameDatabase extends _$GameDatabase {
     await customStatement(
       'ALTER TABLE session_details RENAME TO session_details_v7',
     );
-    await _createSessionDetailsTable();
-    await customStatement(
-      'INSERT INTO session_details(session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes) SELECT session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes FROM session_details_v7',
-    );
-    await customStatement('DROP TABLE session_details_v7');
+    try {
+      await _createSessionDetailsTable();
+      await customStatement(
+        'INSERT INTO session_details(session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes) SELECT session_id, display_name, avatar, smile_samples, smile_average, smile_peak, calibrated_smile_attempted, calibrated_smile_samples, calibrated_smile_average, calibrated_smile_peak, calibrated_smile_span_ms, used_smile_mode, used_touch_mode, completion_timezone_offset_minutes FROM session_details_v7',
+      );
+      await customStatement('DROP TABLE session_details_v7');
+    } on Object {
+      // Some SQLite executors don't wrap schema migrations in a transaction.
+      // Restore the v7 table so a failed copy never leaves a partial schema.
+      await customStatement('DROP TABLE IF EXISTS session_details');
+      await customStatement(
+        'ALTER TABLE session_details_v7 RENAME TO session_details',
+      );
+      rethrow;
+    }
   }
 
   Future<void> _createRecordIndexes() async {

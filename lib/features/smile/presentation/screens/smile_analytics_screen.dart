@@ -109,7 +109,8 @@ class _SmileAnalyticsScreenState extends ConsumerState<SmileAnalyticsScreen> {
           data:
               (rounds) => RefreshIndicator(
                 onRefresh: () async {
-                  await ref.refresh(playerSmileHistoryProvider(query).future);
+                  ref.invalidate(playerSmileHistoryProvider(query));
+                  await ref.read(playerSmileHistoryProvider(query).future);
                 },
                 child: ListView(
                   key: ValueKey('analytics-${profile.id}-${_range.name}'),

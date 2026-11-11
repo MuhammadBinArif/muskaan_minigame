@@ -215,8 +215,9 @@ class _SmileSpotlightScreenState extends ConsumerState<SmileSpotlightScreen>
 
   String _status() {
     final tracking = ref.read(mouthTrackingProvider);
-    if (tracking.hasCameraError || tracking.error != null)
+    if (tracking.hasCameraError || tracking.error != null) {
       return 'Camera unavailable';
+    }
     if (!tracking.isStreaming) return 'Measurement unavailable';
     if (!tracking.isFaceDetected) return 'Face not detected';
     return tracking.smile == null

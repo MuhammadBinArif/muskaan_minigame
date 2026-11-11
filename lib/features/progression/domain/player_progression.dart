@@ -165,8 +165,9 @@ class ProgressionRules {
     if (record.playerId == null ||
         record.state != GameSessionState.results ||
         record.endedAt == null ||
-        record.id <= 0)
+        record.id <= 0) {
       return 0;
+    }
     final rawScoreBonus = record.score ~/ 100;
     final scoreBonus =
         rawScoreBonus < 0

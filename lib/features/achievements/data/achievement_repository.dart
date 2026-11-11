@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../game/data/game_database.dart';
+import '../../game/data/records_repository.dart' show gameDatabaseProvider;
 import '../domain/player_achievement.dart';
 
 class AchievementRepository {
