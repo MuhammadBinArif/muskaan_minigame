@@ -154,6 +154,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       decoration: BoxDecoration(
         color: _SettingsColors.card,
         borderRadius: BorderRadius.circular(15),
+      ),
+      foregroundDecoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
         border: Border.all(color: const Color(0xFF33314F)),
       ),
       child: Column(

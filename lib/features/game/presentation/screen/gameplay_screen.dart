@@ -524,7 +524,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                 ),
                 Positioned(
                 right: 12,
-                top: MediaQuery.paddingOf(context).top + 8,
+                top: MediaQuery.paddingOf(context).top + 58,
                 child: TextButton.icon(
                   onPressed: () => _switchInputMode(!_touchOnly),
                   icon: Icon(_touchOnly ? Icons.camera_alt : Icons.touch_app),
@@ -542,7 +542,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
                   return Positioned(
                     left: 16,
                     right: 16,
-                    top: MediaQuery.paddingOf(context).top + 64,
+                    top: MediaQuery.paddingOf(context).top + 108,
                     child: Material(
                       color: const Color(0xFF252542),
                       borderRadius: BorderRadius.circular(12),
@@ -1359,6 +1359,7 @@ class _TopHud extends StatelessWidget {
         Text('$time', style: _T.timer),
         const SizedBox(width: 10),
         Semantics(
+          key: const Key('gameplay-pause-button'),
           button: true,
           label: isPaused ? 'Resume' : 'Pause',
           child: Material(

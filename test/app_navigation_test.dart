@@ -1104,7 +1104,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       // 2) Pause via the HUD pause button.
-      await tester.tap(find.byIcon(Icons.pause).first);
+      await tester.tap(find.byKey(const Key('gameplay-pause-button')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
     }
@@ -1190,7 +1190,7 @@ void main() {
       expect(find.text('Make it yours'), findsOneWidget);
       expect(find.text('OPEN AVATAR STUDIO'), findsOneWidget);
       expect(find.text('Achievements'), findsOneWidget);
-      expect(find.text('Achievement tracking coming soon'), findsOneWidget);
+      expect(find.text('View verified badges and progress'), findsOneWidget);
     });
 
     testWidgets('matches the 337x700 reference geometry', (tester) async {
