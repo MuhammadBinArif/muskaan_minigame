@@ -226,6 +226,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   Timer? _gameTickTimer;
   Stopwatch get _gameStopwatch => _clock;
   bool _isInitialized = false;
+  bool _notifierDisposed = false;
   bool _hasPersisted = false;
   Future<void>? _saveInFlight;
   GameSessionRecord? _session;
@@ -567,6 +568,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
   ///
   /// Disposal is an abandonment boundary, never evidence of a completed round.
   void leaveGame() {
+    if (_notifierDisposed) return;
     abandonGame();
   }
 
@@ -745,6 +747,7 @@ class GameSessionNotifier extends StateNotifier<GameSessionStateData> {
 
   @override
   void dispose() {
+    _notifierDisposed = true;
     _foodSpawnTimer?.cancel();
     _gameTickTimer?.cancel();
     _gameStopwatch.stop();

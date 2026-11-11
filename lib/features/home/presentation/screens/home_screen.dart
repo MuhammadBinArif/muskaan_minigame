@@ -246,18 +246,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Greeting
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Good evening,', style: AppTypography.greeting),
-                  const SizedBox(height: 2),
-                  const SizedBox(
-                    width: 210,
-                    child: PlayerIdentity(style: AppTypography.userName),
-                  ),
-                ],
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Good evening,', style: AppTypography.greeting),
+                    SizedBox(height: 2),
+                    PlayerIdentity(style: AppTypography.userName),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
 
               // Streak badge
               GestureDetector(

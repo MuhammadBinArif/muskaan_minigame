@@ -298,7 +298,12 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
     _pulse.dispose();
     _float.dispose();
     unawaited(_trackingController?.stopTracking());
-    _sessionController?.leaveGame();
+    final sessionController = _sessionController;
+    if (sessionController != null) {
+      // Riverpod rejects synchronous provider writes while Flutter unmounts
+      // the route. Finish abandonment immediately after tree finalization.
+      Future<void>.microtask(sessionController.leaveGame);
+    }
     _trackingUi.dispose();
     _controlStatus.dispose();
     _presentation.dispose();
@@ -312,6 +317,11 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
         sensitivity: 1,
         responsePerSecond: 10,
       );
+
+  void _quitRound() {
+    _sessionController?.leaveGame();
+    context.go('/home');
+  }
 
   void _onTrackingChanged(
     MouthTrackingState? previous,
@@ -655,7 +665,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             child: _PauseOverlay(
               score: session.stats.score,
               onResume: _resume,
-              onQuit: () => context.go('/home'),
+              onQuit: _quitRound,
             ),
           ),
         if (session.state != GameSessionState.paused)
@@ -767,7 +777,7 @@ class _GameplayScreenState extends ConsumerState<GameplayScreen>
             child: _PauseOverlay(
               score: session.stats.score,
               onResume: _resume,
-              onQuit: () => context.go('/home'),
+              onQuit: _quitRound,
             ),
           ),
         if (session.state == GameSessionState.playing)
