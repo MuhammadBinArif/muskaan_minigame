@@ -486,9 +486,12 @@ class _ResultsBodyState extends State<_ResultsBody>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Semantics(
+          Semantics(
             header: true,
-            child: Text('Smile Measurements', style: AppTypography.smileLabel),
+            child: const Text(
+              'Smile Measurements',
+              style: AppTypography.smileLabel,
+            ),
           ),
           const SizedBox(height: 8),
           if (!hasSamples)

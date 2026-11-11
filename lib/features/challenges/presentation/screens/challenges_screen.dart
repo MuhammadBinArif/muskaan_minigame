@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../profile/data/player_profile_repository.dart';
-import '../application/daily_challenge_service.dart';
-import '../domain/daily_challenge.dart';
+import '../../application/daily_challenge_service.dart';
+import '../../domain/daily_challenge.dart';
 import '../../../../shared/widgets/app_bottom_nav.dart';
 
 class ChallengesScreen extends ConsumerWidget {

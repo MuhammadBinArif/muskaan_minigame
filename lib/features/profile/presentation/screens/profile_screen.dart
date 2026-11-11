@@ -696,10 +696,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       child: InkWell(
         onTap: () => context.push('/achievements'),
         borderRadius: BorderRadius.circular(12),
-        child: const SizedBox(
+        child: SizedBox(
           height: 57,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               children: [
                 Container(

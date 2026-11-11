@@ -91,10 +91,11 @@ class ProgressionService {
         break;
       }
     }
-    if (item == null) return false;
+    final selectedItem = item;
+    if (selectedItem == null) return false;
     final progression = await synchronize(playerId);
     return progression.cosmetics
-        .singleWhere((entry) => entry.item.id == item.id)
+        .singleWhere((entry) => entry.item.id == selectedItem.id)
         .unlocked;
   }
 }
